@@ -162,9 +162,13 @@ DO_DOCK:
     MOVE.W  #5,D2
     BSR     DRAW_SPRITE
 
-    BSR     ERASE_CSM
-    BSR     ERASE_LM
-    
+    MOVE.W  #$1F1E,D1         ; Draw controls at the bottom-right corner
+    MOVE.B  #11,D0            
+    TRAP #15
+    LEA     DOCK_MSG,A1
+    MOVE.B  #14,D0            T
+    RAP #15
+
     MOVE.B  #18,D0            ; Wait for keyboard input
     TRAP    #15
     CMP.L   #1,D1
@@ -176,13 +180,13 @@ DO_DOCK:
     BRA     DO_DOCK
     
 M_L:
-    BSR ERASE_CSM            ; Remove the old sprite
-    SUBQ.W #5,CSM_X          ; Update X Position (Move Left)
-    BRA DO_DOCK
+    BSR     ERASE_CSM            ; Remove the old sprite
+    SUBQ.W  #5,CSM_X          ; Update X Position (Move Left)
+    BRA     DO_DOCK
 M_R:
-    BSR ERASE_CSM            ; Remove the old sprite
-    ADDQ.W #5,CSM_X          ; Update X Position (Move Right)
-    BRA DO_DOCK
+    BSR     ERASE_CSM            ; Remove the old sprite
+    ADDQ.W  #5,CSM_X          ; Update X Position (Move Right)
+    BRA     DO_DOCK
 M_D:
     MOVE.W  CSM_X,D0
     SUB.W   LM_X,D0
@@ -361,7 +365,7 @@ ER_L:                         ; Label to start erase loop
     MOVEM.L (A7)+,D0-D5/A0-A1 ; Restore preserved registers
     RTS
 
-BLANKLINE: DC.B '         ',0   ; 9 spaces (same width as CSM sprite)
+BLANKLINE: DC.B '         ',0   ; 9 spaces (matches sprite width)
 
 ERASE_LM:
     MOVEM.L D0-D5/A0-A1,-(A7)
@@ -390,11 +394,11 @@ DRAW_STARS:
     BSR     P_S
     RTS
 P_S:
-    MOVE.B #11,D0
-    TRAP #15                  ; Set cursor
+    MOVE.B  #11,D0
+    TRAP    #15                  ; Set cursor
     LEA STAR,A1
-    MOVE.B #14,D0
-    TRAP #15                  ; Display "*"
+    MOVE.B  #14,D0
+    TRAP    #15                  ; Display "*"
     RTS
 
 CLEAR_SCREEN:
@@ -424,11 +428,11 @@ PRINT_STATUS_LINE:
     RTS
 
 PRINT_INPUT_LINE:
-    MOVE.W #$0018,D1
-    MOVE.B #11,D0
-    TRAP #15
-    MOVE.B #14,D0
-    TRAP #15
+    MOVE.W  #$0018,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    MOVE.B  #14,D0
+    TRAP    #15
     RTS
 
 ABS:
