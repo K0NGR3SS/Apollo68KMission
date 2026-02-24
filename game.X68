@@ -147,7 +147,7 @@ DO_DOCK:
     
     ; LM upside-down at row 6 (target)  
     MOVE.W  LM_X,D4
-    MOVE.W  #6,D3
+    MOVE.W  #5,D3
     LEA     PTR_LM_UP,A0
     MOVE.W  #5,D2
     BSR     DRAW_SPRITE
@@ -454,7 +454,7 @@ PTR_SATURN: DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15
 PTR_UPPER:  DC.L S1,S2,S3,S4,S5,S6,S14,S15
 PTR_CSM:    DC.L C1,C2,C3,C4,C5
 PTR_LM:     DC.L L1,L2,L3,L4,L5
-PTR_LM_UP: DC.L U1,U2,U3,U4
+PTR_LM_UP:  DC.L U1,U2,U3,U4,U5
 
 S1:  DC.B '     ^     ',0
 S2:  DC.B '    / \    ',0
@@ -486,6 +486,8 @@ L5: DC.B ' /    \ ',0
 
 U1: DC.B ' \ __ / ',0
 U2: DC.B ' _|__|_ ',0
-U3: DC.B ' [    ]',0
-U4: DC.B '  \__/ ',0
+U3: DC.B ' [    ] ',0
+U4: DC.B '  \__/  ',0
+U5: DC.B '   ''   ',0
+
     END START
