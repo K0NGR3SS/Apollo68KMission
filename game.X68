@@ -117,13 +117,6 @@ DO_FLY_TLI:
     BSR     ERASE_ROCKET      ; Clear old position
     BSR     DRAW_STARS        ; Background
     
-    ; Draw docked CSM+LM (use upper stage for now)
-    MOVE.W  #5,D3
-    LEA     PTR_UPPER,A0
-    MOVE.W  #8,D2
-    MOVE.W  #35,D4
-    BSR     DRAW_SPRITE
-    
     MOVE.L  #4,D1
     MOVE.B  #23,D0            TRAP #15     ; Delay
     
@@ -144,32 +137,31 @@ GO_DOCK2:
 DO_DOCK:
     BSR     CLEAR_SCREEN
     BSR     SHOW_STATS
-
-    LEA     DOCK_MSG,A1       ; "DOCK: 1=L, 2=R, 3=DOCK"
-    BSR     PRINT_STATUS_LINE  ; Show docking status prompt
     
-    ; Draw Command Module (player controls)
+    ; CSM at row 8 (player)
     MOVE.W  CSM_X,D4
     MOVE.W  #8,D3
     LEA     PTR_CSM,A0
     MOVE.W  #5,D2
     BSR     DRAW_SPRITE
     
-    ; Draw Lunar Module (target)
+    ; LM upside-down at row 6 (target)  
     MOVE.W  LM_X,D4
-    MOVE.W  #8,D3
-    LEA     PTR_LM,A0
+    MOVE.W  #6,D3
+    LEA     PTR_LM_UP,A0
     MOVE.W  #5,D2
     BSR     DRAW_SPRITE
 
-    MOVE.W  #$1F1E,D1         ; Draw controls at the bottom-right corner
-    MOVE.B  #11,D0            
-    TRAP #15
+    BSR     ERASE_CSM
+    BSR     ERASE_LM
+    
+    ; Controls bottom-right
+    MOVE.W  #$1F1E,D1
+    MOVE.B  #11,D0  TRAP #15
     LEA     DOCK_MSG,A1
-    MOVE.B  #14,D0            T
-    RAP #15
-
-    MOVE.B  #18,D0            ; Wait for keyboard input
+    MOVE.B  #14,D0  TRAP #15
+    
+    MOVE.B  #18,D0  TRAP #15
     TRAP    #15
     CMP.L   #1,D1
     BEQ     M_L               ; Move left
@@ -462,6 +454,7 @@ PTR_SATURN: DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15
 PTR_UPPER:  DC.L S1,S2,S3,S4,S5,S6,S14,S15
 PTR_CSM:    DC.L C1,C2,C3,C4,C5
 PTR_LM:     DC.L L1,L2,L3,L4,L5
+PTR_LM_UP: DC.L U1,U2,U3,U4
 
 S1:  DC.B '     ^     ',0
 S2:  DC.B '    / \    ',0
@@ -491,4 +484,8 @@ L3: DC.B ' [____] ',0
 L4: DC.B '  |__|  ',0
 L5: DC.B ' /    \ ',0
 
+U1: DC.B ' \ __ / ',0
+U2: DC.B ' _|__|_ ',0
+U3: DC.B ' [    ]',0
+U4: DC.B '  \__/ ',0
     END START
