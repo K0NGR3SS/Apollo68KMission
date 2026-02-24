@@ -74,8 +74,8 @@ DO_FLY:
     
     MOVE.W  #5,D3             ; Keep rocket visible near top of screen
     MOVE.W  ALT,D0
-    CMP.W   #10,D0
-    BGT     FLY_SEP           ; Once altitude >10, stage separation occurs
+    CMP.W   #45,D0
+    BGT     FLY_SEP           ; Once altitude >45, stage separation occurs
     BSR     DRAW_FULL_ROCKET
     BRA     FLY_STARS
 FLY_SEP:
@@ -90,7 +90,7 @@ FLY_STARS:
     TRAP    #15               ; Wait or delay (simulate time passing)
     
     MOVE.W  ALT,D0
-    CMP.W   #30,D0            ; Orbit achieved at altitude >= 30
+    CMP.W   #80,D0            ; Orbit achieved at altitude >= 80
     BGE     GO_DOCK
     BRA     DO_FLY
 
@@ -349,8 +349,8 @@ S10: DC.B '  /|   |\  ',0
 S11: DC.B ' | |USA| | ',0
 S12: DC.B ' |_|   |_| ',0
 S13: DC.B '   |___|   ',0
-S14: DC.B '  /     \  ',0
-S15: DC.B ' ( V V V ) ',0
+S14: DC.B '    / \    ',0
+S15: DC.B '   V V V   ',0
 
 C1: DC.B '   /\   ',0
 C2: DC.B '  /  \  ',0
