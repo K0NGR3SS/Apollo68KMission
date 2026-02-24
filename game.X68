@@ -90,7 +90,7 @@ FLY_STARS:
     TRAP    #15               ; Wait or delay (simulate time passing)
     
     MOVE.W  ALT,D0
-    CMP.W   #30,D0            ; Orbit achieved at altitude >= 20
+    CMP.W   #30,D0            ; Orbit achieved at altitude >= 30
     BGE     GO_DOCK
     BRA     DO_FLY
 
@@ -146,6 +146,8 @@ M_D:
     BLE     D_OK
     BRA     DO_DOCK
 D_OK:
+    CLR.W LAND_VY             ; Reset LAND_VY and LAND_Y before entering landing state
+    MOVE.W  #2,LAND_Y
     MOVE.B  #3,STATE          ; Proceed to landing phase
     BRA     MAIN_LOOP
 
