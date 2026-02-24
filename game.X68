@@ -92,6 +92,7 @@ DO_FLY:
     BRA     FLY_STARS
 
 FLY_SEP:
+    BSR     ERASE_ROCKET
     BSR     DRAW_UPPER_STAGE
 
 FLY_STARS:
@@ -226,39 +227,36 @@ SECOND_DOCK:
 * PHASE 3: LUNAR LANDING
 *-------------------------------------------------------
 DO_LAND:
-    BSR     CLEAR_SCREEN      ; Clear docking screen
-    BSR     SHOW_STATS
-
-    ADDQ.W  #1,LAND_VY        ; Apply gravity acceleration
-    MOVE.W  LAND_VY,D0
-    ADD.W   D0,LAND_Y         ; Update Y position based on velocity
+    BSR     ERASE_LM        ; Clear old LM position
+    BSR     SHOW_STATS      ; Update HUD
     
-    ; Draw lunar surface
-    MOVE.W  #$1600,D1         ; Row 22 (near bottom)
-    MOVE.B  #11,D0
-    TRAP    #15
+    ADDQ.W  #1,LAND_VY      ; Gravity
+    MOVE.W  LAND_VY,D0
+    ADD.W   D0,LAND_Y       ; Update Y
+    
+    ; Lunar surface (static)
+    MOVE.W  #$1600,D1
+    MOVE.B  #11,D0          TRAP #15
     LEA     SURFACE,A1
-    MOVE.B  #14,D0
-    TRAP    #15
-
-    MOVE.W  #25,D4            ; LM X center
-    MOVE.W  LAND_Y,D3         ; LM Y position
+    MOVE.B  #14,D0          TRAP #15
+    
+    ; Draw new LM position
+    MOVE.W  #25,D4
+    MOVE.W  LAND_Y,D3
     LEA     PTR_LM,A0
     MOVE.W  #5,D2
     BSR     DRAW_SPRITE
-
-    CMP.W   #18,LAND_Y        ; Touchdown detection
-    BGE     L_HIT
-
+    
+    CMP.W   #18,LAND_Y      BGE     L_HIT
+    
     LEA     LAND_KEYS,A1
     BSR     PRINT_INPUT_LINE
-    MOVE.B  #18,D0
-    TRAP    #15               ; Read key input
-    CMP.L   #1,D1
-    BEQ     L_UP
+    MOVE.B  #18,D0          TRAP #15
+    CMP.L   #1,D1           BEQ     L_UP
     BRA     DO_LAND
+    
 L_UP:
-    SUBI.W #4,LAND_VY         ; Reduce velocity = thrust upward
+    SUBI.W  #4,LAND_VY
     BRA     DO_LAND
 
 L_HIT:
@@ -363,7 +361,7 @@ ER_L:                         ; Label to start erase loop
     MOVEM.L (A7)+,D0-D5/A0-A1 ; Restore preserved registers
     RTS
 
-BLANKLINE: DC.B '       ',0   ; 9 spaces (same width as CSM sprite)
+BLANKLINE: DC.B '         ',0   ; 9 spaces (same width as CSM sprite)
 
 ERASE_LM:
     MOVEM.L D0-D5/A0-A1,-(A7)
