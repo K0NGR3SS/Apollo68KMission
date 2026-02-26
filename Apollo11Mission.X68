@@ -13,8 +13,8 @@ FLY_STATE   EQU 1
 DOCK_STATE  EQU 2
 FLY_DOCKED  EQU 3
 
-CSM_ROW     EQU 10            ; CSM sprite top row
-LM_ROW      EQU 5             ; FIX B: was 6, now 5 so rows 5-9, no overlap with CSM rows 10-14
+CSM_ROW     EQU 10
+LM_ROW      EQU 5
 SPRITE_H    EQU 5
 
 *-------------------------------------------------------
@@ -66,8 +66,9 @@ DO_PAD:
 
     MOVE.B  #18,D0
     TRAP    #15
+    ; Clear screen on transition so launch prompt is gone before flight starts
+    BSR     CLEAR_SCREEN
     MOVE.B  #1,STATE
-    BSR     ERASE_PROMPT
     BRA     MAIN_LOOP
 
 *-------------------------------------------------------
@@ -96,6 +97,8 @@ FLY_STARS:
     BGE     GO_DOCK
     BRA     DO_FLY
 GO_DOCK:
+    ; Clear screen on transition so rocket ghost is gone before docking starts
+    BSR     CLEAR_SCREEN
     MOVE.B  #2,STATE
     BRA     MAIN_LOOP
 
@@ -120,8 +123,15 @@ DO_DOCK:
     MOVE.W  #SPRITE_H,D2
     BSR     DRAW_SPRITE
 
-    ; FIX A: show docking instructions so player knows what to press
-    MOVE.W  #$1500,D1         ; Row 21, col 0
+    ; Erase old dock msg before printing new one so it never doubles up
+    MOVE.W  #$1500,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANK_DOCK,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    MOVE.W  #$1500,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     DOCK_MSG,A1
@@ -163,11 +173,9 @@ D_OK:
     BRA     MAIN_LOOP
 
 *-------------------------------------------------------
-* PHASE 3: JOINT FLIGHT — fly 50 altitude units then stop
+* PHASE 3: JOINT FLIGHT
 *-------------------------------------------------------
 DO_FLY_DOCKED:
-    ; FIX C: on very first frame (DOCKED_ALT=0), clear screen to remove
-    ;         ghost sprites left at their docking positions
     TST.W   DOCKED_ALT
     BNE     DFD_SKIP_CLEAR
     BSR     CLEAR_SCREEN
@@ -190,7 +198,6 @@ DFD_SKIP_CLEAR:
     BGE     END_GAME
     BRA     DO_FLY_DOCKED
 
-*--- Draw: LM (upright) at row 4, CSM directly below at row 9, both col 30 ---
 DRAW_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
@@ -208,7 +215,6 @@ DRAW_JOINT:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
-*--- Erase: wipes 10 rows (LM 5 + CSM 5) at column 30 ---
 ERASE_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
@@ -261,15 +267,6 @@ DS_L:
     SUBQ.W  #1,D2
     BNE     DS_L
     MOVEM.L (A7)+,D0-D5/A0-A1
-    RTS
-
-ERASE_PROMPT:
-    MOVE.W  #$1402,D1
-    MOVE.B  #11,D0
-    TRAP    #15
-    LEA     BLANK_PROMPT,A1
-    MOVE.B  #14,D0
-    TRAP    #15
     RTS
 
 ERASE_ROCKET:
@@ -364,14 +361,6 @@ SHOW_STATS:
     TRAP    #15
     RTS
 
-PRINT_INPUT_LINE:
-    MOVE.W  #$0018,D1
-    MOVE.B  #11,D0
-    TRAP    #15
-    MOVE.B  #14,D0
-    TRAP    #15
-    RTS
-
 ABS:
     TST.W   D0
     BPL     A_X
@@ -389,8 +378,8 @@ END_GAME:
 STAR:           DC.B    '*',0
 ALT_MSG:        DC.B    'ALTITUDE: ',0
 PROMPT_LAUNCH:  DC.B    '1 + ENTER TO LAUNCH!',0
-DOCK_MSG:       DC.B    '1=LEFT  2=RIGHT  3=DOCK',0   ; FIX A: restored
-BLANK_PROMPT:   DC.B    '                     ',0
+DOCK_MSG:       DC.B    '1=LEFT  2=RIGHT  3=DOCK',0
+BLANK_DOCK:     DC.B    '                       ',0   ;
 BLANKLINE_WIDE: DC.B    '            ',0
 
 PTR_SATURN: DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15
