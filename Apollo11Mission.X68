@@ -5,150 +5,128 @@
 * Description: Apollo 11 Mission
 *-----------------------------------------------------------
 
-    ORG $1000                 ; Program starts at address $1000
+    ORG $1000
 
 *--- CONSTANTS ---
-PAD_STATE   EQU 0             ; Rocket on the launch pad
-FLY_STATE   EQU 1             ; In mid-flight (ascent)
-DOCK_STATE  EQU 2             ; Docking phase in orbit
-FLY_TLI     EQU 4             ; Trans Lunar Injection
-LAND_STATE  EQU 3             ; Lunar landing phase
+PAD_STATE   EQU 0
+FLY_STATE   EQU 1
+DOCK_STATE  EQU 2
+FLY_DOCKED  EQU 3
+
+CSM_ROW     EQU 10            ; CSM sprite top row
+LM_ROW      EQU 5             ; FIX B: was 6, now 5 so rows 5-9, no overlap with CSM rows 10-14
+SPRITE_H    EQU 5
 
 *-------------------------------------------------------
 * VARIABLES
 *-------------------------------------------------------
-    ORG $4000                 ; Variable memory block starting at $4000
-ALT:        DC.W    0         ; 16-bit altitude counter
-STATE:      DC.B    0         ; Current game state
-    DS.B    1                 ; Padding/alignment byte
-CSM_X:      DC.W    10        ; Command/Service Module X position
-LM_X:       DC.W    40        ; Lunar Module X position
-LAND_Y:     DC.W    2         ; Lunar Module vertical position
-LAND_VY:    DC.W    0         ; Vertical speed (velocity) for landing
-DOCKED      DC.B    0
+    ORG $4000
+ALT:        DC.W    0
+STATE:      DC.B    0
+            DS.B    1
+CSM_X:      DC.W    10
+LM_X:       DC.W    40
+DOCKED_ALT: DC.W    0
 
 *-------------------------------------------------------
 * START
 *-------------------------------------------------------
-    ORG $1000                 ; Reaffirm start of program area
+    ORG $1000
 START:
-    BSR     CLEAR_SCREEN      ; Clear the display before starting
+    BSR     CLEAR_SCREEN
 
 MAIN_LOOP:
-    MOVE.B  STATE,D0          ; Load current state into D0
-    CMP.B   #PAD_STATE,D0     ; Compare with PAD phase
+    MOVE.B  STATE,D0
+    CMP.B   #PAD_STATE,D0
     BEQ     DO_PAD
-    CMP.B   #FLY_STATE,D0     ; Compare with FLIGHT phase
+    CMP.B   #FLY_STATE,D0
     BEQ     DO_FLY
-    CMP.B   #DOCK_STATE,D0    ; Compare with DOCKING phase
+    CMP.B   #DOCK_STATE,D0
     BEQ     DO_DOCK
-    CMP.B   #FLY_TLI, D0
-    BEQ     DO_FLY_TLI
-    CMP.B   #LAND_STATE,D0    ; Compare with LANDING phase
-    BEQ     DO_LAND
-    BRA     END_GAME          ; Unknown state = end program
+    CMP.B   #FLY_DOCKED,D0
+    BEQ     DO_FLY_DOCKED
+    BRA     END_GAME
 
 *-------------------------------------------------------
-* PHASE 0: PRE-LAUNCH SEQUENCE
+* PHASE 0: PRE-LAUNCH
 *-------------------------------------------------------
 DO_PAD:
-    BSR     CLEAR_SCREEN      ; Wipe everything
-    BSR     SHOW_STATS        ; Redraw altitude HUD
+    BSR     CLEAR_SCREEN
+    BSR     SHOW_STATS
+    BSR     DRAW_STARS
+    MOVE.W  #5,D3
+    BSR     DRAW_FULL_ROCKET
 
-    BSR     DRAW_STARS        ; Draw stars background (static backdrop)
-    MOVE.W  #5,D3             ; Y position for rocket (Row 5)
-    BSR     DRAW_FULL_ROCKET  ; Draw the full Saturn V rocket sprite
-    
-    MOVE.W  #$1402,D1         ; Cursor position: row 20, column 2
+    MOVE.W  #$1402,D1
     MOVE.B  #11,D0
-    TRAP    #15               ; OS display command to position cursor
-    
-    LEA     PROMPT_LAUNCH,A1  ; Load "1 + ENTER TO LAUNCH!" message
-    MOVE.B  #14,D0
-    TRAP    #15               ; Display message
-    
-    MOVE.B  #18,D0            ; Input trap: wait for keyboard input
     TRAP    #15
-    MOVE.B  #1,STATE          ; Switch game state to FLIGHT
-    BSR     ERASE_PROMPT      ; Erase text on screen fromm this state
-    BRA     MAIN_LOOP         
+    LEA     PROMPT_LAUNCH,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    MOVE.B  #18,D0
+    TRAP    #15
+    MOVE.B  #1,STATE
+    BSR     ERASE_PROMPT
+    BRA     MAIN_LOOP
 
 *-------------------------------------------------------
-* PHASE 1: FLIGHT
+* PHASE 1: FLIGHT (ascent)
 *-------------------------------------------------------
 DO_FLY:
-    BSR     SHOW_STATS        ; Update altitude number only
-
-    ADDQ.W  #1,ALT            ; Increase altitude each frame
-    
-    BSR     ERASE_ROCKET      ; Clear old rocket
-    BSR     DRAW_STARS        ; Background
-    
-    MOVE.W  #5,D3             ; Keep rocket visible near top
+    BSR     SHOW_STATS
+    ADDQ.W  #1,ALT
+    BSR     ERASE_ROCKET
+    BSR     DRAW_STARS
+    MOVE.W  #5,D3
     MOVE.W  ALT,D0
     CMP.W   #45,D0
     BGT     FLY_SEP
-    BSR     DRAW_FULL_ROCKET  ; Redraw at same position
+    BSR     DRAW_FULL_ROCKET
     BRA     FLY_STARS
-
 FLY_SEP:
     BSR     ERASE_ROCKET
     BSR     DRAW_UPPER_STAGE
-
 FLY_STARS:
     MOVE.L  #4,D1
     MOVE.B  #23,D0
-    TRAP    #15               ; Delay
-    
+    TRAP    #15
     MOVE.W  ALT,D0
     CMP.W   #80,D0
     BGE     GO_DOCK
     BRA     DO_FLY
-
 GO_DOCK:
-    MOVE.B  #2,STATE          ; Switch to docking state
+    MOVE.B  #2,STATE
     BRA     MAIN_LOOP
-
-DO_FLY_TLI:
-    BSR     SHOW_STATS        ; Update altitude
-    
-    ADDQ.W  #2,ALT            ; Faster climb for TLI burn
-    
-    BSR     ERASE_ROCKET      ; Clear old position
-    BSR     DRAW_STARS        ; Background
-    
-    MOVE.L  #4,D1
-    MOVE.B  #23,D0            TRAP #15     ; Delay
-    
-    MOVE.W  ALT,D0
-    CMP.W   #180,D0           ; TLI complete at alt 180
-    BGE     GO_DOCK2
-    BRA     DO_FLY_TLI
-
-GO_DOCK2:
-    MOVE.W  #10,CSM_X         ; Reset docking positions
-    MOVE.B  #2,STATE          ; Back to docking phase
-    BRA     MAIN_LOOP
-
 
 *-------------------------------------------------------
 * PHASE 2: DOCKING
 *-------------------------------------------------------
 DO_DOCK:
-    BSR ERASE_CSM
-    BSR ERASE_LM
+    BSR     ERASE_CSM
+    BSR     ERASE_LM
 
+    ; Draw CSM
     MOVE.W  CSM_X,D4
-    MOVE.W  #10,D3
+    MOVE.W  #CSM_ROW,D3
     LEA     PTR_CSM,A0
-    MOVE.W  #5,D2
+    MOVE.W  #SPRITE_H,D2
     BSR     DRAW_SPRITE
 
+    ; Draw LM
     MOVE.W  LM_X,D4
-    MOVE.W  #6,D3
+    MOVE.W  #LM_ROW,D3
     LEA     PTR_LM_UP,A0
-    MOVE.W  #5,D2
+    MOVE.W  #SPRITE_H,D2
     BSR     DRAW_SPRITE
+
+    ; FIX A: show docking instructions so player knows what to press
+    MOVE.W  #$1500,D1         ; Row 21, col 0
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     DOCK_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
 
     MOVE.B  #18,D0
     TRAP    #15
@@ -159,9 +137,8 @@ DO_DOCK:
     BEQ     M_R
     CMP.L   #3,D1
     BEQ     M_D
-
     BRA     DO_DOCK
-    
+
 M_L:
     CMP.W   #0,CSM_X
     BLE     DO_DOCK
@@ -175,128 +152,119 @@ M_R:
 M_D:
     MOVE.W  CSM_X,D0
     SUB.W   LM_X,D0
-    BSR     ABS               ; Difference in X (distance)
-    CMP.W   #5,D0             ; If within 5 pixels, it's aligned
+    BSR     ABS
+    CMP.W   #5,D0
     BLE     D_OK
     BRA     DO_DOCK
+
 D_OK:
-    MOVE.B  DOCKED,D0         ; Check if first or second docking
-    CMP.B   #1,D0
-    BEQ     SECOND_DOCK
-    
-FIRST_DOCK:
-    MOVE.B  #1,DOCKED         ; Mark first docking complete
-    BSR     CLEAR_SCREEN
-    BSR     SHOW_STATS
-    
-    LEA     TLI_PROMPT,A1     ; "PRESS 1 FOR TLI BURN!"
-    MOVE.W  #$1400,D1         ; Row 20, col 0
-    MOVE.B  #11,D0            
-    TRAP #15
-    MOVE.B  #14,D0            
-    TRAP #15
-    
-    MOVE.B  #18,D0            
-    TRAP #15                  ; Wait for input
-    CMP.L   #1,D1
-    BNE     DO_DOCK
-    
-    MOVE.B  #0,DOCKED         ; Reset for second docking
-    MOVE.W  #10,CSM_X         ; Reset CSM position
-    MOVE.B  #4,STATE          ; Go to FLY_TLI
-    BRA     MAIN_LOOP
-    
-SECOND_DOCK:
-    CLR.W   LAND_VY
-    MOVE.W  #2,LAND_Y
-    MOVE.B  #3,STATE          ; Go to LANDING
+    CLR.W   DOCKED_ALT
+    MOVE.B  #3,STATE
     BRA     MAIN_LOOP
 
 *-------------------------------------------------------
-* PHASE 3: LUNAR LANDING
+* PHASE 3: JOINT FLIGHT — fly 50 altitude units then stop
 *-------------------------------------------------------
-DO_LAND:
-    BSR     ERASE_LM        ; Clear old LM position
-    BSR     SHOW_STATS      ; Update HUD
-    
-    ADDQ.W  #1,LAND_VY      ; Gravity
-    MOVE.W  LAND_VY,D0
-    ADD.W   D0,LAND_Y       ; Update Y
-    
-    ; Lunar surface (static)
-    MOVE.W  #$1600,D1
-    MOVE.B  #11,D0          TRAP #15
-    LEA     SURFACE,A1
-    MOVE.B  #14,D0          TRAP #15
-    
-    ; Draw new LM position
-    MOVE.W  #25,D4
-    MOVE.W  LAND_Y,D3
-    LEA     PTR_LM,A0
+DO_FLY_DOCKED:
+    ; FIX C: on very first frame (DOCKED_ALT=0), clear screen to remove
+    ;         ghost sprites left at their docking positions
+    TST.W   DOCKED_ALT
+    BNE     DFD_SKIP_CLEAR
+    BSR     CLEAR_SCREEN
+DFD_SKIP_CLEAR:
+
+    BSR     SHOW_STATS
+    ADDQ.W  #1,ALT
+    ADDQ.W  #1,DOCKED_ALT
+
+    BSR     ERASE_JOINT
+    BSR     DRAW_STARS
+    BSR     DRAW_JOINT
+
+    MOVE.L  #4,D1
+    MOVE.B  #23,D0
+    TRAP    #15
+
+    MOVE.W  DOCKED_ALT,D0
+    CMP.W   #50,D0
+    BGE     END_GAME
+    BRA     DO_FLY_DOCKED
+
+*--- Draw: LM (upright) at row 4, CSM directly below at row 9, both col 30 ---
+DRAW_JOINT:
+    MOVEM.L D0-D5/A0-A1,-(A7)
+    MOVE.W  #30,D4
+
+    MOVE.W  #4,D3
+    LEA     PTR_LM_UP,A0
     MOVE.W  #5,D2
     BSR     DRAW_SPRITE
-    
-    CMP.W   #18,LAND_Y      BGE     L_HIT
-    
-    LEA     LAND_KEYS,A1
-    BSR     PRINT_INPUT_LINE
-    MOVE.B  #18,D0          TRAP #15
-    CMP.L   #1,D1           BEQ     L_UP
-    BRA     DO_LAND
-    
-L_UP:
-    SUBI.W  #4,LAND_VY
-    BRA     DO_LAND
 
-L_HIT:
-    CMP.W   #4,LAND_VY        ; If impact speed <=4, safe landing
-    BLE     WIN
-    LEA     CRASH_MSG,A1
-    MOVE.B  #14,D0
-    TRAP    #15               ; Display CRASH message
-    BRA     END_GAME
-WIN:
-    LEA     WIN_MSG,A1
+    MOVE.W  #9,D3
+    LEA     PTR_CSM,A0
+    MOVE.W  #5,D2
+    BSR     DRAW_SPRITE
+
+    MOVEM.L (A7)+,D0-D5/A0-A1
+    RTS
+
+*--- Erase: wipes 10 rows (LM 5 + CSM 5) at column 30 ---
+ERASE_JOINT:
+    MOVEM.L D0-D5/A0-A1,-(A7)
+    MOVE.W  #30,D4
+    MOVE.W  #4,D3
+    MOVE.W  #10,D2
+EJ_L:
+    MOVE.W  D4,D1
+    LSL.W   #8,D1
+    OR.B    D3,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    BRA     END_GAME
+    ADDQ.W  #1,D3
+    SUBQ.W  #1,D2
+    BNE     EJ_L
+    MOVEM.L (A7)+,D0-D5/A0-A1
+    RTS
 
 *-------------------------------------------------------
-* RENDERING AND DRAWING SUBROUTINES
+* RENDERING SUBROUTINES
 *-------------------------------------------------------
 DRAW_FULL_ROCKET:
     LEA     PTR_SATURN,A0
-    MOVE.W  #15,D2            ; Rocket height is 15 lines
-    MOVE.W  #35,D4            ; Column is 35
+    MOVE.W  #15,D2
+    MOVE.W  #35,D4
     BSR     DRAW_SPRITE
     RTS
 
 DRAW_UPPER_STAGE:
     LEA     PTR_UPPER,A0
-    MOVE.W  #8,D2             ; Shorter sprite height
+    MOVE.W  #8,D2
     MOVE.W  #35,D4
     BSR     DRAW_SPRITE
     RTS
 
 DRAW_SPRITE:
-    MOVEM.L D0-D5/A0-A1,-(A7) ; Save registers
+    MOVEM.L D0-D5/A0-A1,-(A7)
 DS_L:
     MOVE.W  D4,D1
-    LSL.W   #8,D1             ; Combine row and column into a word
+    LSL.W   #8,D1
     OR.B    D3,D1
     MOVE.B  #11,D0
-    TRAP    #15               ; Set cursor position
-    MOVE.L  (A0)+,A1          ; Load next line of sprite text
+    TRAP    #15
+    MOVE.L  (A0)+,A1
     MOVE.B  #14,D0
-    TRAP    #15               ; Draw the string
-    ADDQ.W  #1,D3             ; Move to next line down
+    TRAP    #15
+    ADDQ.W  #1,D3
     SUBQ.W  #1,D2
-    BNE     DS_L              ; Loop until all lines drawn
-    MOVEM.L (A7)+,D0-D5/A0-A1 ; Restore registers
+    BNE     DS_L
+    MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
 ERASE_PROMPT:
-    MOVE.W  #$1402,D1      ; Same row/column as the launch text
+    MOVE.W  #$1402,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANK_PROMPT,A1
@@ -304,14 +272,12 @@ ERASE_PROMPT:
     TRAP    #15
     RTS
 
-BLANK_PROMPT: DC.B '                     ',0  ; Same length as launch text
-
 ERASE_ROCKET:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #35,D4         ; Same X as rocket
-    MOVE.W  #5,D3          ; Same Y start
-    MOVE.W  #15,D2         ; Height of rocket
-    LEA     BLANKLINE,A1
+    MOVE.W  #35,D4
+    MOVE.W  #5,D3
+    MOVE.W  #15,D2
+    LEA     BLANKLINE_WIDE,A1
 ER_R:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -327,37 +293,31 @@ ER_R:
     RTS
 
 ERASE_CSM:
-    MOVEM.L D0-D5/A0-A1,-(A7) ; Preserve registers because we modify them
-    MOVE.W  CSM_X,D4          ; Load current X coordinate
-    MOVE.W  #8,D3             ; Y is row position of the sprite on screen
-    MOVE.W  #5,D2             ; sprite height
-
-ER_L:                         ; Label to start erase loop
+    MOVEM.L D0-D5/A0-A1,-(A7)
+    MOVE.W  CSM_X,D4
+    MOVE.W  #CSM_ROW,D3
+    MOVE.W  #SPRITE_H,D2
+ER_CSM_L:
     MOVE.W  D4,D1
-    LSL.W   #8,D1             ; Shift left 8 bites
-    OR.B    D3,D1             ; Merge Y into low byte (full screen position)
+    LSL.W   #8,D1
+    OR.B    D3,D1
     MOVE.B  #11,D0
-    TRAP    #15               ; Set cursor at D1 position
-
-    LEA     BLANKLINE,A1      ; Load address of the blank line text
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
-    TRAP    #15               ; Print the blank string
-
-    ADDQ.W  #1,D3             ; Move down one row each loop
-    SUBQ.W  #1,D2             ; Decrease line counter
-    BNE     ER_L              ; Loop until all lines of ship cleared
-
-    MOVEM.L (A7)+,D0-D5/A0-A1 ; Restore preserved registers
+    TRAP    #15
+    ADDQ.W  #1,D3
+    SUBQ.W  #1,D2
+    BNE     ER_CSM_L
+    MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
-
-BLANKLINE: DC.B '         ',0   ; 9 spaces (matches sprite width)
 
 ERASE_LM:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  LM_X,D4           ; LM position (fixed)
-    MOVE.W  #8,D3
-    MOVE.W  #5,D2
-    LEA     BLANKLINE,A1      ; Same blank line works (same width)
+    MOVE.W  LM_X,D4
+    MOVE.W  #LM_ROW,D3
+    MOVE.W  #SPRITE_H,D2
+    LEA     BLANKLINE_WIDE,A1
 ER_LM_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -380,36 +340,28 @@ DRAW_STARS:
     RTS
 P_S:
     MOVE.B  #11,D0
-    TRAP    #15                  ; Set cursor
-    LEA STAR,A1
+    TRAP    #15
+    LEA     STAR,A1
     MOVE.B  #14,D0
-    TRAP    #15                  ; Display "*"
+    TRAP    #15
     RTS
 
 CLEAR_SCREEN:
     MOVE.B  #12,D0
-    TRAP    #15               ; Clear terminal screen
+    TRAP    #15
     RTS
 
 SHOW_STATS:
-    MOVE.W  #$0014,D1         ; Cursor position: row 0, col 20
+    MOVE.W  #$0014,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     ALT_MSG,A1
     MOVE.B  #14,D0
-    TRAP    #15               ; Print "ALTITUDE: "
+    TRAP    #15
     MOVE.W  ALT,D1
     EXT.L   D1
     MOVE.B  #3,D0
-    TRAP    #15               ; Print the value of ALT
-    RTS
-
-PRINT_STATUS_LINE:
-    MOVE.W #$0000,D1
-    MOVE.B #11,D0
-    TRAP #15
-    MOVE.B #14,D0
-    TRAP #15
+    TRAP    #15
     RTS
 
 PRINT_INPUT_LINE:
@@ -421,32 +373,29 @@ PRINT_INPUT_LINE:
     RTS
 
 ABS:
-    TST.W D0
-    BPL A_X                   ; If positive, skip negate
-    NEG.W D0
-A_X: RTS
+    TST.W   D0
+    BPL     A_X
+    NEG.W   D0
+A_X:
+    RTS
 
 END_GAME:
     MOVE.B  #9,D0
-    TRAP    #15               ; End simulation
+    TRAP    #15
 
 *-------------------------------------------------------
-* DATA STRINGS & SPRITE DEFINITIONS
+* DATA
 *-------------------------------------------------------
-STAR:       DC.B    '*',0
-ALT_MSG:    DC.B    'ALTITUDE: ',0
-PROMPT_LAUNCH: DC.B '1 + ENTER TO LAUNCH!',0
-DOCK_MSG:   DC.B    'DOCK: 1=L, 2=R, 3=DOCK',0
-LAND_KEYS:  DC.B    '1=THRUST: ',0
-TLI_PROMPT: DC.B    'PRESS 1 FOR TLI BURN' ,0
-WIN_MSG:    DC.B    13,10,'SUCCESS!',0
-CRASH_MSG:  DC.B    13,10,'CRASH!',0
-SURFACE:    DC.B    '________________________________________________',0
+STAR:           DC.B    '*',0
+ALT_MSG:        DC.B    'ALTITUDE: ',0
+PROMPT_LAUNCH:  DC.B    '1 + ENTER TO LAUNCH!',0
+DOCK_MSG:       DC.B    '1=LEFT  2=RIGHT  3=DOCK',0   ; FIX A: restored
+BLANK_PROMPT:   DC.B    '                     ',0
+BLANKLINE_WIDE: DC.B    '            ',0
 
 PTR_SATURN: DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15
 PTR_UPPER:  DC.L S1,S2,S3,S4,S5,S6,S14,S15
 PTR_CSM:    DC.L C1,C2,C3,C4,C5
-PTR_LM:     DC.L L1,L2,L3,L4,L5
 PTR_LM_UP:  DC.L U1,U2,U3,U4,U5
 
 S1:  DC.B '     ^     ',0
@@ -470,12 +419,6 @@ C2: DC.B '  /  \  ',0
 C3: DC.B ' |    | ',0
 C4: DC.B ' |____| ',0
 C5: DC.B '  /__\  ',0
-
-L1: DC.B '   __   ',0
-L2: DC.B '  /  \  ',0
-L3: DC.B ' [____] ',0
-L4: DC.B '  |__|  ',0
-L5: DC.B ' /    \ ',0
 
 U1: DC.B ' \ __ / ',0
 U2: DC.B ' _|__|_ ',0
