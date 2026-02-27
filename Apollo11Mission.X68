@@ -21,12 +21,17 @@ SPRITE_H    EQU 5
 * VARIABLES
 *-------------------------------------------------------
     ORG $4000
+
 ALT:        DC.W    0
 STATE:      DC.B    0
             DS.B    1
 CSM_X:      DC.W    10
+OLD_CSM_X:  DC.W    10
+CSM_Y:      DC.W    12
+OLD_CSM_Y   DC.W    12
 LM_X:       DC.W    40
 DOCKED_ALT: DC.W    0
+
 
 *-------------------------------------------------------
 * START
@@ -55,7 +60,7 @@ DO_PAD:
     BSR     SHOW_STATS
     BSR     DRAW_STARS
     MOVE.W  #5,D3
-    BSR     DRAW_FULL_ROCKET
+    BSR     DRAW_PAD_ROCKET
 
     MOVE.W  #$1402,D1
     MOVE.B  #11,D0
@@ -72,7 +77,7 @@ DO_PAD:
     BRA     MAIN_LOOP
 
 *-------------------------------------------------------
-* PHASE 1: FLIGHT (ascent)
+* PHASE 1: FLIGHT
 *-------------------------------------------------------
 DO_FLY:
     BSR     SHOW_STATS
@@ -97,81 +102,109 @@ FLY_STARS:
     BGE     GO_DOCK
     BRA     DO_FLY
 GO_DOCK:
-    ; Clear screen on transition so rocket ghost is gone before docking starts
+    BSR     ERASE_UPPER_STAGE  
     BSR     CLEAR_SCREEN
-    MOVE.B  #2,STATE
+    MOVE.B  #DOCK_STATE,STATE
     BRA     MAIN_LOOP
 
 *-------------------------------------------------------
 * PHASE 2: DOCKING
 *-------------------------------------------------------
 DO_DOCK:
+
+    BSR     CLEAR_SCREEN        ; Clear Stage 1 rocket remnants
+
+DOCK_LOOP:
+    BSR     SHOW_STATS          ; Keep altitude visible
+    
+    ; Erase old position
+    MOVE.W  OLD_CSM_X, D4
+    MOVE.W  OLD_CSM_Y, D3
     BSR     ERASE_CSM
-    BSR     ERASE_LM
-
-    ; Draw CSM
-    MOVE.W  CSM_X,D4
-    MOVE.W  #CSM_ROW,D3
-    LEA     PTR_CSM,A0
-    MOVE.W  #SPRITE_H,D2
+    
+    ; Draw LM (Static)
+    MOVE.W  LM_X, D4
+    MOVE.W  #LM_ROW, D3
+    LEA     PTR_LM_UP, A0
+    MOVE.W  #SPRITE_H, D2
     BSR     DRAW_SPRITE
 
-    ; Draw LM
-    MOVE.W  LM_X,D4
-    MOVE.W  #LM_ROW,D3
-    LEA     PTR_LM_UP,A0
-    MOVE.W  #SPRITE_H,D2
+    ; Draw CSM (Moving)
+    MOVE.W  CSM_X, D4
+    MOVE.W  CSM_Y, D3
+    LEA     PTR_CSM, A0
+    MOVE.W  #SPRITE_H, D2
     BSR     DRAW_SPRITE
 
-    ; Erase old dock msg before printing new one so it never doubles up
-    MOVE.W  #$1500,D1
-    MOVE.B  #11,D0
+    MOVE.W  #$1500, D1          ; Position for instructions
+    MOVE.B  #11, D0
     TRAP    #15
-    LEA     BLANK_DOCK,A1
-    MOVE.B  #14,D0
-    TRAP    #15
-
-    MOVE.W  #$1500,D1
-    MOVE.B  #11,D0
-    TRAP    #15
-    LEA     DOCK_MSG,A1
-    MOVE.B  #14,D0
+    
+    LEA     DOCK_MSG, A1
+    MOVE.B  #14, D0
     TRAP    #15
 
-    MOVE.B  #18,D0
-    TRAP    #15
+    MOVE.B  #18, D0             ; Read keyboard (Wait for key)
+    TRAP    #15                 ; Result in D1
 
-    CMP.L   #1,D1
+    ; Store current as "old" before updating
+    MOVE.W  CSM_X, OLD_CSM_X
+    MOVE.W  CSM_Y, OLD_CSM_Y
+
+    CMP.L   #$1B, D1            ; Check for ESC or specific keys
+
+    CMP.B   #1, D1
+    BEQ     M_U
+
+    CMP.B   #2, D1
+    BEQ     M_S
+
+    CMP.B   #3, D1
     BEQ     M_L
-    CMP.L   #2,D1
-    BEQ     M_R
-    CMP.L   #3,D1
-    BEQ     M_D
-    BRA     DO_DOCK
 
+    CMP.B   #4, D1
+    BEQ     M_R
+
+    CMP.B   #5,  D1
+    BEQ     M_D
+
+    BRA     DOCK_LOOP   
+    
 M_L:
-    CMP.W   #0,CSM_X
-    BLE     DO_DOCK
-    SUBQ.W  #5,CSM_X
-    BRA     DO_DOCK
+    SUBQ.W  #2, CSM_X
+    BRA     DOCK_LOOP
+
 M_R:
-    CMP.W   #71,CSM_X
-    BGE     DO_DOCK
-    ADDQ.W  #5,CSM_X
-    BRA     DO_DOCK
+    ADDQ.W  #2, CSM_X
+    BRA     DOCK_LOOP
+
+M_U:
+    SUBQ.W  #1, CSM_Y
+    BRA     DOCK_LOOP
+
+M_S:
+    ADDQ.W  #1, CSM_Y           ;M_S is move down, just using M_D as docking
+    BRA     DOCK_LOOP
+
 M_D:
-    MOVE.W  CSM_X,D0
-    SUB.W   LM_X,D0
+    MOVE.W  CSM_X, D0
+    SUB.W   LM_X, D0
     BSR     ABS
-    CMP.W   #5,D0
+    CMP.W   #3, D0              ; Tolerance
+    BGT     DOCK_LOOP           ; Too far
+    MOVE.W  CSM_Y, D0
+
+    SUB.W   #LM_ROW+5, D0       ; Check if bottom of LM meets top of CSM
+    BSR     ABS
+    CMP.W   #1, D0
     BLE     D_OK
-    BRA     DO_DOCK
+    BRA     DOCK_LOOP
 
 D_OK:
     CLR.W   DOCKED_ALT
-    MOVE.B  #3,STATE
+    MOVE.B  #3, STATE
     BRA     MAIN_LOOP
-
+    
 *-------------------------------------------------------
 * PHASE 3: JOINT FLIGHT
 *-------------------------------------------------------
@@ -202,14 +235,14 @@ DRAW_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
 
-    MOVE.W  #4,D3
+    MOVE.W  #5,D3
     LEA     PTR_LM_UP,A0
     MOVE.W  #5,D2
     BSR     DRAW_SPRITE
 
     MOVE.W  #9,D3
-    LEA     PTR_CSM,A0
-    MOVE.W  #5,D2
+    LEA     PTR_CSM_FLY,A0
+    MOVE.W  #6,D2
     BSR     DRAW_SPRITE
 
     MOVEM.L (A7)+,D0-D5/A0-A1
@@ -238,16 +271,22 @@ EJ_L:
 *-------------------------------------------------------
 * RENDERING SUBROUTINES
 *-------------------------------------------------------
+DRAW_PAD_ROCKET:
+    LEA     PTR_SATURN,A0
+    MOVE.W  #18,D2
+    MOVE.W  #35,D4
+    BSR     DRAW_SPRITE
+    RTS
 DRAW_FULL_ROCKET:
     LEA     PTR_SATURN,A0
-    MOVE.W  #15,D2
+    MOVE.W  #19,D2
     MOVE.W  #35,D4
     BSR     DRAW_SPRITE
     RTS
 
 DRAW_UPPER_STAGE:
     LEA     PTR_UPPER,A0
-    MOVE.W  #8,D2
+    MOVE.W  #11,D2
     MOVE.W  #35,D4
     BSR     DRAW_SPRITE
     RTS
@@ -273,7 +312,7 @@ ERASE_ROCKET:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #35,D4
     MOVE.W  #5,D3
-    MOVE.W  #15,D2
+    MOVE.W  #19,D2
     LEA     BLANKLINE_WIDE,A1
 ER_R:
     MOVE.W  D4,D1
@@ -288,27 +327,47 @@ ER_R:
     BNE     ER_R
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
-
-ERASE_CSM:
+    
+ERASE_UPPER_STAGE:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  CSM_X,D4
-    MOVE.W  #CSM_ROW,D3
-    MOVE.W  #SPRITE_H,D2
-ER_CSM_L:
+    MOVE.W  #35,D4              ; Same X as DRAW_UPPER_STAGE
+    MOVE.W  #5,D3               ; Starting Row
+    MOVE.W  #11,D2               ; Height of upper stage
+    LEA     BLANKLINE_WIDE,A1
+ER_UP_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
     OR.B    D3,D1
-    MOVE.B  #11,D0
+    MOVE.B  #11,D0              ; Cursor Pos
     TRAP    #15
-    LEA     BLANKLINE_WIDE,A1
-    MOVE.B  #14,D0
+    MOVE.B  #14,D0              ; Print Blanks
     TRAP    #15
     ADDQ.W  #1,D3
     SUBQ.W  #1,D2
-    BNE     ER_CSM_L
+    BNE     ER_UP_L
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
-
+    
+ERASE_CSM:
+    MOVEM.L D0-D5/A0-A1,-(A7)
+    MOVE.W  OLD_CSM_X, D4       ; Use the OLD X
+    MOVE.W  OLD_CSM_Y, D3       ; Use the OLD Y
+    MOVE.W  #SPRITE_H, D2
+    LEA     BLANKLINE_WIDE, A1
+ER_CSM_L:
+    MOVE.W  D4, D1
+    LSL.W   #8, D1
+    OR.B    D3, D1
+    MOVE.B  #11, D0             ; Set Cursor
+    TRAP    #15
+    MOVE.B  #14, D0             ; Print Blanks
+    TRAP    #15
+    ADDQ.W  #1, D3
+    SUBQ.W  #1, D2
+    BNE     ER_CSM_L
+    MOVEM.L (A7)+, D0-D5/A0-A1
+    RTS
+    
 ERASE_LM:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  LM_X,D4
@@ -377,37 +436,43 @@ END_GAME:
 *-------------------------------------------------------
 STAR:           DC.B    '*',0
 ALT_MSG:        DC.B    'ALTITUDE: ',0
-PROMPT_LAUNCH:  DC.B    '1 + ENTER TO LAUNCH!',0
-DOCK_MSG:       DC.B    '1=LEFT  2=RIGHT  3=DOCK',0
-BLANK_DOCK:     DC.B    '                       ',0   ;
-BLANKLINE_WIDE: DC.B    '            ',0
+PROMPT_LAUNCH:  DC.B    '1 to Lift Off!',0
+DOCK_MSG:       DC.B    'Move with Numbers',0
+BLANK_DOCK:     DC.B    '                            ',0
+BLANKLINE_WIDE: DC.B    '                    ',0
 
-PTR_SATURN: DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15
-PTR_UPPER:  DC.L S1,S2,S3,S4,S5,S6,S14,S15
+PTR_SATURN: DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19
+PTR_UPPER:  DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S18,S19
 PTR_CSM:    DC.L C1,C2,C3,C4,C5
+PTR_CSM_FLY: DC.L C1,C2,C3,C4,C5,C6
 PTR_LM_UP:  DC.L U1,U2,U3,U4,U5
 
-S1:  DC.B '     ^     ',0
-S2:  DC.B '    / \    ',0
-S3:  DC.B '   |   |   ',0
+S1:  DC.B '     |     ',0
+S2:  DC.B '     !     ',0
+S3:  DC.B '    / \    ',0
 S4:  DC.B '   |   |   ',0
 S5:  DC.B '   |   |   ',0
-S6:  DC.B '   |---|   ',0
+S6:  DC.B '   |   |   ',0
 S7:  DC.B '   |   |   ',0
 S8:  DC.B '   |   |   ',0
-S9:  DC.B '   |---|   ',0
-S10: DC.B '  /|   |\  ',0
-S11: DC.B ' | |USA| | ',0
-S12: DC.B ' |_|   |_| ',0
-S13: DC.B '   |___|   ',0
-S14: DC.B '    / \    ',0
-S15: DC.B '   V V V   ',0
+S9:  DC.B '   |   |   ',0
+S10: DC.B '   |---|   ',0
+S11: DC.B '   | | |   ',0
+S12: DC.B '   | | |   ',0
+S13: DC.B '   | | |   ',0
+S14: DC.B '   | | |   ',0
+S15: DC.B '   | U |   ',0
+S16: DC.B '  /| S |\  ',0
+S17: DC.B ' |_|_A_|_| ',0
+S18: DC.B '   /\|/\   ',0
+S19: DC.B '   V V V   ',0
 
 C1: DC.B '   /\   ',0
 C2: DC.B '  /  \  ',0
 C3: DC.B ' |    | ',0
 C4: DC.B ' |____| ',0
 C5: DC.B '  /__\  ',0
+C6: DC.B '   VV   ',0
 
 U1: DC.B ' \ __ / ',0
 U2: DC.B ' _|__|_ ',0
