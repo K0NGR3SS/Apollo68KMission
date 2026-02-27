@@ -27,11 +27,11 @@ SCREEN_HEIGHT   EQU 25
 LMU_START_X     EQU 40              ; Start in middle of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
-LMU_MOVE        EQU 1               ; Horizontal movement speed
 LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
-SURFACE_Y       EQU 20              ; Row where moon surface is
-LANDING_ZONE_X1 EQU 30              ; Left edge of safe landing zone
-LANDING_ZONE_X2 EQU 50              ; Right edge of safe landing zone
+SURFACE_Y       EQU 19              ; Row where moon surface is
+LANDING_ZONE_X1 EQU 25              ; Left edge of safe landing zone
+LANDING_ZONE_X2 EQU 55              ; Right edge of safe landing zone
+FRAME_DELAY     EQU 8
 
 ; Easy68K screen memory base address
 SCREEN_MEM      EQU $E00000
@@ -69,13 +69,8 @@ OLD_LMU_Y:      DC.W    0           ; Previous Y for erasing
 BUTTON_LEFT:    DC.B    0
 BUTTON_RIGHT:   DC.B    0
 BUTTON_THRUST:  DC.B    0
+GRAV_COUNT:     DC.W    0
                 DS.B    1           ; Padding
-
-BG_BUFFER:      DS.B    BG_SIZE
-
-; Landing background data (included at assembly time)
-LANDINGSITE_BG: INCBIN  "landingsite.bin"
-
 *-------------------------------------------------------
 * START
 *-------------------------------------------------------
@@ -307,43 +302,26 @@ DO_LANDING:
     ; One-time initialisation
     TST.W   LANDING_INIT
     BNE     SKIP_LANDING_INIT
-    BSR     LOAD_LANDING_BG
+    BSR     CLEAR_SCREEN            ; <-- FIX: clear screen on entry
+    BSR     DRAW_MOON_SURFACE       ; Draw ASCII moon background once
     BSR     INIT_LMU_LANDING
     MOVE.W  #1,LANDING_INIT
 SKIP_LANDING_INIT:
 
-    ; Read player input BEFORE physics update
     BSR     READ_LANDING_INPUT
-
-    ; Erase LMU at old position
     BSR     ERASE_LMU
-
-    ; Update physics and position
     BSR     UPDATE_LMU
-
-    ; Redraw background then LMU on top
-    BSR     DRAW_LANDING_BG
     BSR     DRAW_LMU
-
-    ; Show fuel / velocity stats
     BSR     SHOW_LANDING_STATS
-
-    ; Check if landed or crashed
     BSR     CHECK_LANDING
 
-    ; Short delay then loop
-    MOVE.L  #3,D1
+    ; Frame delay — controls game speed / gravity feel
+    MOVE.L  #FRAME_DELAY,D1
     MOVE.B  #23,D0
     TRAP    #15
 
     BRA     DO_LANDING
 
-*-------------------------------------------------------
-* READ_LANDING_INPUT
-* Reads keyboard without blocking. Sets BUTTON_* flags.
-* Easy68K TRAP #15 task 19 = non-blocking key check.
-* D1 = 0 if no key, else ASCII code of key.
-*-------------------------------------------------------
 READ_LANDING_INPUT:
     MOVEM.L D0-D1,-(A7)
 
@@ -402,7 +380,8 @@ INIT_LMU_LANDING:
 
 *-------------------------------------------------------
 * UPDATE_LMU
-* Applies gravity, thrust, and movement each frame.
+* Gravity applies every 4 frames via GRAV_COUNT.
+* Thrust and movement apply every frame.
 *-------------------------------------------------------
 UPDATE_LMU:
     MOVEM.L D0,-(A7)
@@ -411,21 +390,31 @@ UPDATE_LMU:
     MOVE.W  LMU_X,OLD_LMU_X
     MOVE.W  LMU_Y,OLD_LMU_Y
 
-    ; Apply gravity (increase downward velocity)
+    ; Only apply gravity every 4 frames
+    ADDQ.W  #1,GRAV_COUNT
+    MOVE.W  GRAV_COUNT,D0
+    CMP.W   #4,D0
+    BLT     UL_SKIP_GRAV
+    CLR.W   GRAV_COUNT
     ADD.W   #GRAVITY,LMU_VY
+UL_SKIP_GRAV:
 
-    ; Apply thrust (reduce downward velocity)
+    ; Thrust cancels downward velocity (apply every frame)
     TST.B   BUTTON_THRUST
     BEQ     UL_NO_THRUST
     SUB.W   #LMU_THRUST,LMU_VY
+    ; Don't let thrust push upward too fast
+    MOVE.W  LMU_VY,D0
+    CMP.W   #-3,D0
+    BGE     UL_NO_THRUST
+    MOVE.W  #-3,LMU_VY
 UL_NO_THRUST:
 
-    ; Apply horizontal movement
+    ; Horizontal movement
     TST.B   BUTTON_LEFT
     BEQ     UL_NO_LEFT
     SUB.W   #LMU_MOVE,LMU_X
 UL_NO_LEFT:
-
     TST.B   BUTTON_RIGHT
     BEQ     UL_NO_RIGHT
     ADD.W   #LMU_MOVE,LMU_X
@@ -436,69 +425,111 @@ UL_NO_RIGHT:
     CMP.W   #0,D0
     BGE     UL_NO_CLAMP_L
     CLR.W   LMU_X
-    CLR.W   LMU_VX
 UL_NO_CLAMP_L:
     MOVE.W  LMU_X,D0
     CMP.W   #SCREEN_WIDTH-8,D0
     BLE     UL_NO_CLAMP_R
     MOVE.W  #SCREEN_WIDTH-8,LMU_X
-    CLR.W   LMU_VX
 UL_NO_CLAMP_R:
 
-    ; Clamp vertical velocity (terminal velocity)
+    ; Terminal velocity cap
     MOVE.W  LMU_VY,D0
-    CMP.W   #5,D0
+    CMP.W   #4,D0
     BLE     UL_NO_CLAMP_V
-    MOVE.W  #5,LMU_VY
+    MOVE.W  #4,LMU_VY
 UL_NO_CLAMP_V:
 
-    ; Update vertical position
-    ADD.W   LMU_VY,LMU_Y
-
-    ; Don't let LMU go above top of screen
+    ; Stop going above screen
     MOVE.W  LMU_Y,D0
     CMP.W   #0,D0
-    BGE     UL_DONE
+    BGE     UL_UPDATE_POS
     CLR.W   LMU_Y
     CLR.W   LMU_VY
-UL_DONE:
+UL_UPDATE_POS:
+
+    ; Update vertical position
+    MOVE.W  LMU_VY,D0
+    ADD.W   D0,LMU_Y
+
     MOVEM.L (A7)+,D0
     RTS
 
 *-------------------------------------------------------
-* DRAW_LANDING_BG
-* Writes the background image from BG_BUFFER directly
-* to Easy68K screen memory at $E00000.
-* Each screen cell = 2 bytes: [char][attribute].
-* 80 cols x 25 rows = 4000 bytes total.
+* DRAW_MOON_SURFACE
+* Draws a full ASCII moon landscape across rows 20-24.
+* Row 19 = flat landing zone marker.
+* Called once on landing init.
 *-------------------------------------------------------
-DRAW_LANDING_BG:
-    MOVEM.L D0/A0-A1,-(A7)
-    LEA     BG_BUFFER,A0        ; Source: our loaded background
-    LEA     SCREEN_MEM,A1       ; Destination: screen memory
-    MOVE.W  #BG_SIZE-1,D0       ; DBRA needs count-1
-DLB_LOOP:
-    MOVE.B  (A0)+,(A1)+
-    DBRA    D0,DLB_LOOP
-    MOVEM.L (A7)+,D0/A0-A1
-    RTS
+DRAW_MOON_SURFACE:
+    MOVEM.L D0-D4/A0-A1,-(A7)
 
-*-------------------------------------------------------
-* LOAD_LANDING_BG
-* Copies landingsite.bin data from LANDINGSITE_BG label
-* into BG_BUFFER ready for rendering.
-*-------------------------------------------------------
-LOAD_LANDING_BG:
-    MOVEM.L D0/A0-A1,-(A7)
-    LEA     LANDINGSITE_BG,A0
-    LEA     BG_BUFFER,A1
-    MOVE.W  #BG_SIZE-1,D0
-LLB_LOOP:
-    MOVE.B  (A0)+,(A1)+
-    DBRA    D0,LLB_LOOP
-    MOVEM.L (A7)+,D0/A0-A1
-    RTS
+    ; Draw space (stars) rows 1-18
+    MOVE.W  #1,D3
+MS_SPACE_L:
+    MOVE.W  #0,D4
+    MOVE.W  D4,D1
+    LSL.W   #8,D1
+    OR.B    D3,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     SPACE_LINE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    ADDQ.W  #1,D3
+    CMP.W   #19,D3
+    BLT     MS_SPACE_L
 
+    ; Draw flat landing zone indicator at row 19
+    MOVE.W  #0,D4
+    MOVE.W  D4,D1
+    LSL.W   #8,D1
+    OR.B    D3,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     ZONE_LINE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    ; Draw surface row 20 (top of terrain)
+    MOVE.W  #20,D3
+    MOVE.W  #0,D4
+    MOVE.W  D4,D1
+    LSL.W   #8,D1
+    OR.B    D3,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     SURFACE_TOP,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    ; Draw solid moon rows 21-24
+    MOVE.W  #21,D3
+MS_GROUND_L:
+    MOVE.W  #0,D4
+    MOVE.W  D4,D1
+    LSL.W   #8,D1
+    OR.B    D3,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     GROUND_LINE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    ADDQ.W  #1,D3
+    CMP.W   #25,D3
+    BLT     MS_GROUND_L
+
+    ; Also draw a couple of stars manually
+    MOVE.W  #$0308,D1
+    BSR     P_S
+    MOVE.W  #$1503,D1
+    BSR     P_S
+    MOVE.W  #$4A06,D1
+    BSR     P_S
+    MOVE.W  #$300B,D1
+    BSR     P_S
+
+    MOVEM.L (A7)+,D0-D4/A0-A1
+    RTS
 *-------------------------------------------------------
 * DRAW_LMU
 * Draws the Lunar Module at current LMU_X, LMU_Y.
@@ -582,11 +613,19 @@ SHOW_LANDING_STATS:
 CHECK_LANDING:
     MOVEM.L D0-D1,-(A7)
 
+    ; LMU bottom = LMU_Y + LM_LAND_H - 1
     MOVE.W  LMU_Y,D0
+    ADD.W   #LM_LAND_H,D0       ; D0 = row of bottom pixel of LMU
+
     CMP.W   #SURFACE_Y,D0
     BLT     CL_DONE             ; Still in the air
 
-    ; LMU has hit the surface — check if safe landing
+    ; Clamp LMU so it sits exactly on surface, doesn't go through
+    MOVE.W  #SURFACE_Y,D0
+    SUB.W   #LM_LAND_H,D0
+    MOVE.W  D0,LMU_Y
+    CLR.W   LMU_VY
+
     ; Check horizontal position within landing zone
     MOVE.W  LMU_X,D0
     CMP.W   #LANDING_ZONE_X1,D0
@@ -594,15 +633,10 @@ CHECK_LANDING:
     CMP.W   #LANDING_ZONE_X2,D0
     BGT     CL_CRASH
 
-    ; Check vertical velocity is not too fast (safe = VY <= 2)
-    MOVE.W  LMU_VY,D0
-    CMP.W   #2,D0
-    BGT     CL_CRASH
-
     ; --- SUCCESSFUL LANDING ---
+    MOVEM.L (A7)+,  D0-D1
     BSR     CLEAR_SCREEN
-    MOVE.W  #$0A05,D1           ; Row 10, Col 5... wait, format is col|row
-    MOVE.W  #$050A,D1           ; Col=5, Row=10
+    MOVE.W  #$050A,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     LAND_SUCCESS,A1
@@ -611,7 +645,7 @@ CHECK_LANDING:
     BRA     CL_END_GAME
 
 CL_CRASH:
-    ; --- CRASH LANDING ---
+    MOVEM.L (A7)+, D0-D1
     BSR     CLEAR_SCREEN
     MOVE.W  #$050A,D1
     MOVE.B  #11,D0
@@ -621,7 +655,6 @@ CL_CRASH:
     TRAP    #15
 
 CL_END_GAME:
-    ; Wait for keypress then quit
     MOVE.B  #18,D0
     TRAP    #15
     BRA     END_GAME
@@ -629,7 +662,6 @@ CL_END_GAME:
 CL_DONE:
     MOVEM.L (A7)+,D0-D1
     RTS
-
 *-------------------------------------------------------
 * RENDERING SUBROUTINES
 *-------------------------------------------------------
@@ -812,6 +844,11 @@ VY_MSG:         DC.B    'VY:',0
 X_MSG:          DC.B    '  X:',0
 LAND_SUCCESS:   DC.B    '*** EAGLE HAS LANDED! ***',0
 LAND_CRASH:     DC.B    '*** CRASH LANDING! MISSION FAILED ***',0
+; Landing scene background strings (all exactly 80 chars)
+SPACE_LINE:  DC.B '                                                                                ',0
+ZONE_LINE:   DC.B '         [------------ LANDING ZONE ------------]                               ',0
+SURFACE_TOP: DC.B '~~~~\/\/\________________________________________/\/\/\/\/\/\/\/\/\/\/\/\/\/~~~~',0
+GROUND_LINE: DC.B '################################################################################',0
 
 ; Sprite pointer tables
 PTR_SATURN:  DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19
