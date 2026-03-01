@@ -26,9 +26,9 @@ SCREEN_HEIGHT   EQU 25
 
 ; rocket/pad specific constants
 ROCKET_H        EQU 19            ; number of rows in Saturn sprite
-PAD_COL         EQU 35            ; column where pad/rocket are centred
+PAD_COL         EQU 34            ; column where pad/rocket are centred
 PAD_START_ROW   EQU SCREEN_HEIGHT ; initial pad row (bottom of screen)
-CENTER_ROW      EQU 12          ; vertical centre for flight (approx)
+CENTER_ROW      EQU 13          ; vertical centre for flight (approx)
 PAD_HEIGHT      EQU 2             ; height of launch pad graphic
 
 ; Landing Module Unit (LMU) constants
@@ -132,7 +132,7 @@ WAIT_LAUNCH:
 
     MOVE.B  #18,D0                 ; blocking read
     TRAP    #15
-    CMP.B   #'1',D1
+    CMP.B   #1,D1
     BNE     WAIT_LAUNCH
 
     ; countdown animation
@@ -485,13 +485,14 @@ UL_NO_THRUST:
     ; Horizontal movement
     TST.B   BUTTON_LEFT
     BEQ     UL_NO_LEFT
-    MOVE.W  LMU_VX, D0
-    SUB.W   D0, LMU_X
+    SUB.W   #LMU_MOVE, D0
+    MOVE.W  D0, LMU_X
 UL_NO_LEFT:
     TST.B   BUTTON_RIGHT
     BEQ     UL_NO_RIGHT
     MOVE.W  LMU_VY, D0
-    ADD.W   D0, LMU_Y
+    ADD.W   #LMU_MOVE, D0
+    MOVE.W  D0, LMU_X
 UL_NO_RIGHT:
 
     ; Clamp horizontal to screen bounds
@@ -1015,10 +1016,6 @@ L5: DC.B ' / vv \ ',0
 
     END START
 
-*~Font name~Courier New~
-*~Font size~10~
-*~Tab type~1~
-*~Tab size~4~
 *~Font name~Courier New~
 *~Font size~10~
 *~Tab type~1~
