@@ -16,12 +16,20 @@ DOCK_STATE      EQU 2
 FLY_DOCKED      EQU 3
 LAND_STAGE      EQU 4
 
+; screen layout constants
 CSM_ROW         EQU 10
 LM_ROW          EQU 5
 SPRITE_H        EQU 5
 
 SCREEN_WIDTH    EQU 80
 SCREEN_HEIGHT   EQU 25
+
+; rocket/pad specific constants
+ROCKET_H        EQU 19            ; number of rows in Saturn sprite
+PAD_COL         EQU 35            ; column where pad/rocket are centred
+PAD_START_ROW   EQU SCREEN_HEIGHT ; initial pad row (bottom of screen)
+CENTER_ROW      EQU 12          ; vertical centre for flight (approx)
+PAD_HEIGHT      EQU 2             ; height of launch pad graphic
 
 ; Landing Module Unit (LMU) constants
 LMU_START_X     EQU 40              ; Start in middle of screen
@@ -49,6 +57,8 @@ BG_SIZE         EQU SCREEN_COLS*SCREEN_ROWS*2
 STATE:          DC.B    0
                 DS.B    1           ; Padding for word alignment
 ALT:            DC.W    0
+PAD_ROW:        DC.W    0           ; current pad vertical position
+OLD_PAD_ROW:    DC.W    0           ; previous pad position (for erasing)
 CSM_X:          DC.W    10
 OLD_CSM_X:      DC.W    10
 CSM_Y:          DC.W    12
@@ -96,22 +106,41 @@ MAIN_LOOP:
 * PHASE 0: PRE-LAUNCH (PAD)
 *-------------------------------------------------------
 DO_PAD:
+    ; draw launch pad + rocket at bottom of screen
     BSR     CLEAR_SCREEN
     BSR     SHOW_STATS
     BSR     DRAW_STARS
-    MOVE.W  #5,D3
-    BSR     DRAW_PAD_ROCKET
+    ; compute rocket row so its base sits on bottom
+    MOVE.W  #PAD_START_ROW,D3      ; start from bottom
+    SUB.W   #ROCKET_H,D3           ; adjust for rocket height
+    MOVE.W  #PAD_COL,D4
+    BSR     DRAW_PAD_ROCKET        ; uses D3 and D4 now
+    ; draw pad beneath rocket
+    MOVE.W  #PAD_START_ROW,D3
+    MOVE.W  #PAD_COL,D4
+    MOVE.W  #PAD_HEIGHT,D2
+    LEA     PTR_PAD,A0
+    BSR     DRAW_SPRITE
 
-    MOVE.W  #$1402,D1
+WAIT_LAUNCH:
+    MOVE.W  #$1402,D1              ; position cursor
     MOVE.B  #11,D0
     TRAP    #15
     LEA     PROMPT_LAUNCH,A1
     MOVE.B  #14,D0
     TRAP    #15
 
-    MOVE.B  #18,D0
+    MOVE.B  #18,D0                 ; blocking read
     TRAP    #15
+    CMP.B   #'1',D1
+    BNE     WAIT_LAUNCH
+
+    ; countdown animation
+    BSR     COUNTDOWN
+
     BSR     CLEAR_SCREEN
+    CLR.W   PAD_ROW               ; reset pad tracking
+    CLR.W   OLD_PAD_ROW
     MOVE.B  #FLY_STATE,STATE
     BRA     MAIN_LOOP
 
@@ -121,15 +150,58 @@ DO_PAD:
 DO_FLY:
     BSR     SHOW_STATS
     ADDQ.W  #1,ALT
+
+    ; erase old rocket
+    MOVE.W  #PAD_COL,D4
+    MOVE.W  #CENTER_ROW,D3
+    MOVE.W  #ROCKET_H,D2
     BSR     ERASE_ROCKET
+
+    ; erase previous pad if it existed
+    MOVE.W  OLD_PAD_ROW,D3
+    TST.W   D3
+    BEQ     SKIP_ERASE_PAD
+    MOVE.W  #PAD_COL,D4
+    MOVE.W  #PAD_HEIGHT,D2
+    BSR     ERASE_ROCKET
+SKIP_ERASE_PAD:
+
+    ; recalc pad position based on altitude
+    MOVE.W  ALT,D0               ; half altitude to slow pad disappearance
+    ASR.W   #1,D0
+    MOVE.W  #PAD_START_ROW,D1
+    SUB.W   D0,D1               ; new pad row
+    MOVE.W  D1,PAD_ROW
+    MOVE.W  PAD_ROW,OLD_PAD_ROW ; remember for next frame
+
+    ; stars are always drawn every frame
     BSR     DRAW_STARS
-    MOVE.W  #5,D3
+
+    ; draw pad if still on screen
+    TST.W   PAD_ROW
+    BLT     SKIP_PAD_DRAW
+    MOVE.W  PAD_ROW,D3
+    MOVE.W  #PAD_COL,D4
+    MOVE.W  #PAD_HEIGHT,D2
+    LEA     PTR_PAD,A0
+    BSR     DRAW_SPRITE
+
+SKIP_PAD_DRAW:
+    ; rocket stays centred vertically
+    MOVE.W  #CENTER_ROW,D3
+    MOVE.W  #PAD_COL,D4
+
+    ; separation threshold unchanged
     MOVE.W  ALT,D0
     CMP.W   #45,D0
     BGT     FLY_SEP
     BSR     DRAW_FULL_ROCKET
     BRA     FLY_STARS
 FLY_SEP:
+    ; erase full rocket at centre before showing upper stage
+    MOVE.W  #PAD_COL,D4
+    MOVE.W  #CENTER_ROW,D3
+    MOVE.W  #ROCKET_H,D2
     BSR     ERASE_ROCKET
     BSR     DRAW_UPPER_STAGE
 FLY_STARS:
@@ -315,7 +387,7 @@ SKIP_LANDING_INIT:
     BSR     SHOW_LANDING_STATS
     BSR     CHECK_LANDING
 
-    ; Frame delay — controls game speed / gravity feel
+    ; Frame delay ï¿½ controls game speed / gravity feel
     MOVE.L  #FRAME_DELAY,D1
     MOVE.B  #23,D0
     TRAP    #15
@@ -657,10 +729,55 @@ CL_DONE:
 * RENDERING SUBROUTINES
 *-------------------------------------------------------
 DRAW_PAD_ROCKET:
+    ; draw the full Saturn sprite using caller supplied row (D3) and column (D4)
     LEA     PTR_SATURN,A0
-    MOVE.W  #18,D2
-    MOVE.W  #35,D4
+    MOVE.W  #ROCKET_H-1,D2
     BSR     DRAW_SPRITE
+    RTS
+
+;-------------------------------------------------------
+; COUNTDOWN - display 3,2,1,GO! with brief pauses
+;-------------------------------------------------------
+COUNTDOWN:
+    MOVEM.L D0-D1,-(A7)
+
+    MOVE.W  #$1402,D1          ; set cursor at some fixed location
+    MOVE.B  #11,D0
+    TRAP    #15
+
+    ; show '3'
+    LEA     COUNT3,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.L  #$1500,D1          ; simple delay
+    MOVE.B  #23,D0
+    TRAP    #15
+
+    ; show '2'
+    LEA     COUNT2,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.L  #$1500,D1
+    MOVE.B  #23,D0
+    TRAP    #15
+
+    ; show '1'
+    LEA     COUNT1,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.L  #$1500,D1
+    MOVE.B  #23,D0
+    TRAP    #15
+
+    ; show GO!
+    LEA     COUNTGO,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.L  #$1500,D1
+    MOVE.B  #23,D0
+    TRAP    #15
+
+    MOVEM.L (A7)+,D0-D1
     RTS
 
 DRAW_FULL_ROCKET:
@@ -700,10 +817,8 @@ DS_L:
     RTS
 
 ERASE_ROCKET:
+    ; now a generic erase routine - caller must supply D4=column, D3=row, D2=height
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #35,D4
-    MOVE.W  #5,D3
-    MOVE.W  #19,D2
     LEA     BLANKLINE_WIDE,A1
 ER_R:
     MOVE.W  D4,D1
@@ -829,6 +944,10 @@ END_GAME:
 STAR:           DC.B    '*',0
 ALT_MSG:        DC.B    'ALTITUDE: ',0
 PROMPT_LAUNCH:  DC.B    '1 to Lift Off!',0
+COUNT3:          DC.B    '3',0
+COUNT2:          DC.B    '2',0
+COUNT1:          DC.B    '1',0
+COUNTGO:         DC.B    'GO!',0
 DOCK_MSG:       DC.B    'Move: 1=Up 2=Dn 3=Lt 4=Rt 5=Dock',0
 BLANKLINE_WIDE: DC.B    '                    ',0
 VY_MSG:         DC.B    'VY:',0
@@ -841,6 +960,10 @@ GROUND_LINE: DC.B '#############################################################
 
 ; Sprite pointer tables
 PTR_SATURN:  DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19
+PTR_PAD:     DC.L P1,P2
+
+P1:          DC.B '   |=====|   ',0
+P2:          DC.B '  / ===== \  ',0
 PTR_UPPER:   DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S18,S19
 PTR_CSM:     DC.L C1,C2,C3,C4,C5
 PTR_CSM_FLY: DC.L C1,C2,C3,C4,C5,C6
