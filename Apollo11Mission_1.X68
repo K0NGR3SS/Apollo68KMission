@@ -24,7 +24,7 @@ SCREEN_WIDTH    EQU 80
 SCREEN_HEIGHT   EQU 25
 
 ; Landing Module Unit (LMU) constants
-LMU_START_X     EQU 40              ; Start in middle of screen
+LMU_START_X     EQU 70              ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
 LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
@@ -34,8 +34,8 @@ LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
 FRAME_DELAY     EQU 15
 LM_WIDTH        EQU 8
 
-FLY_FUEL_MAX    EQU 100             ; Phase 1 fuel (drains each frame)
-LAND_FUEL_MAX   EQU 30              ; Landing fuel units
+FLY_FUEL_MAX    EQU 70              ; Phase 1 fuel (drains each frame during stage 1)
+LAND_FUEL_MAX   EQU 10              ; Landing fuel units
 
 *-------------------------------------------------------
 * VARIABLES
@@ -70,6 +70,7 @@ PWD_BUF:        DS.B    8           ; scratch buffer for PRINT_WORD_DEC
 FLY_INIT:       DC.W    0           ; 1 once FLY_STATE has been inited
 FLY_FUEL:       DC.W    0           ; Phase 1 fuel remaining
 LAND_FUEL:      DC.W    0           ; Landing fuel remaining
+STAGE_SEP:      DC.W    0           ; 0=stage1 active, 1=upper stage flying
 *-------------------------------------------------------
 * START
 *-------------------------------------------------------
@@ -116,19 +117,26 @@ DO_PAD:
 
 *-------------------------------------------------------
 * PHASE 1: FLIGHT
+* Rocket auto-ascends. Press 2 (after ALT>=45) to
+* separate stage 1. Upper stage then flies to ALT 80.
+* Fuel drains only during stage 1. Out of fuel = lose.
 *-------------------------------------------------------
 DO_FLY:
     ; One-time init
     TST.W   FLY_INIT
     BNE     SKIP_FLY_INIT
     MOVE.W  #FLY_FUEL_MAX,FLY_FUEL
+    CLR.W   STAGE_SEP
     MOVE.W  #1,FLY_INIT
 SKIP_FLY_INIT:
 
     BSR     SHOW_FLY_STATS
     ADDQ.W  #1,ALT
 
-    ; Consume fuel each frame
+    TST.W   STAGE_SEP
+    BNE     FLY_STAGE2
+
+    ; ======= STAGE 1 =======
     SUBQ.W  #1,FLY_FUEL
     MOVE.W  FLY_FUEL,D0
     BLE     FLY_FUEL_OUT
@@ -136,41 +144,66 @@ SKIP_FLY_INIT:
     BSR     ERASE_ROCKET
     BSR     DRAW_STARS
     MOVE.W  #5,D3
+    BSR     DRAW_FULL_ROCKET
+
+    ; Only allow separation after ALT 45
     MOVE.W  ALT,D0
     CMP.W   #45,D0
-    BGT     FLY_SEP
-    BSR     DRAW_FULL_ROCKET
-    BRA     FLY_READ_KEY
-FLY_SEP:
-    BSR     DRAW_UPPER_STAGE
-    ; Show jettison hint on bottom row
+    BLT     FLY_S1_DELAY
+
+    ; Show separation prompt at bottom row
     MOVE.W  #$0018,D1
     MOVE.B  #11,D0
     TRAP    #15
-    LEA     JETTISON_MSG,A1
+    LEA     SEP_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-FLY_READ_KEY:
+
     ; Non-blocking key check
     MOVE.B  #18,D0
     TRAP    #15
-    CMP.B   #1,D1
-    BNE     FLY_DELAY
-    ; Key 1 pressed: only jettison after stage sep
-    MOVE.W  ALT,D0
-    CMP.W   #45,D0
-    BLE     FLY_DELAY
-    ; --- JETTISON ---
-    BSR     ERASE_UPPER_STAGE
-    BSR     CLEAR_SCREEN
-    CLR.W   FLY_INIT            ; reset flag for replay
-    MOVE.B  #DOCK_STATE,STATE
-    BRA     MAIN_LOOP
-FLY_DELAY:
+    CMP.B   #2,D1
+    BNE     FLY_S1_DELAY
+
+    ; --- STAGE SEPARATION ---
+    ; Blank the prompt row immediately
+    MOVE.W  #$0018,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    BSR     ERASE_ROCKET        ; clear full rocket sprite
+    MOVE.W  #1,STAGE_SEP
+
+FLY_S1_DELAY:
     MOVE.L  #4,D1
     MOVE.B  #23,D0
     TRAP    #15
     BRA     DO_FLY
+
+    ; ======= STAGE 2 (upper stage) =======
+FLY_STAGE2:
+    BSR     ERASE_UPPER_STAGE
+    BSR     DRAW_STARS
+    MOVE.W  #5,D3
+    BSR     DRAW_UPPER_STAGE
+
+    MOVE.W  ALT,D0
+    CMP.W   #80,D0
+    BGE     FLY_GO_DOCK
+    MOVE.L  #4,D1
+    MOVE.B  #23,D0
+    TRAP    #15
+    BRA     DO_FLY
+
+FLY_GO_DOCK:
+    BSR     ERASE_UPPER_STAGE
+    BSR     CLEAR_SCREEN
+    CLR.W   FLY_INIT
+    CLR.W   STAGE_SEP
+    MOVE.B  #DOCK_STATE,STATE
+    BRA     MAIN_LOOP
 
 FLY_FUEL_OUT:
     BSR     CLEAR_SCREEN
@@ -941,7 +974,7 @@ VY_MSG:         DC.B    'VY:',0
 X_MSG:          DC.B    '  X:',0
 FUEL_MSG:       DC.B    'FUEL:',0
 FLY_FUEL_LBL:   DC.B    '  FUEL:',0
-JETTISON_MSG:   DC.B    'Press 1 to JETTISON upper stage!',0
+SEP_MSG:        DC.B    'Press 2 to separate stage 1!   ',0
 FLY_FUEL_MSG:   DC.B    '*** OUT OF FUEL! MISSION FAILED ***',0
 LAND_SUCCESS:   DC.B    '*** EAGLE HAS LANDED! ***',0
 LAND_CRASH:     DC.B    '*** CRASH LANDING! MISSION FAILED ***',0
