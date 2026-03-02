@@ -28,14 +28,14 @@ LMU_START_X     EQU 70              ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
 LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
-SURFACE_Y       EQU 20              ; Row where moon surface is
+SURFACE_Y       EQU 21              ; Row where moon surface is
 LANDING_ZONE_X1 EQU 9              ; Left edge of safe landing zone
 LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
 FRAME_DELAY     EQU 15
 LM_WIDTH        EQU 8
 
 FLY_FUEL_MAX    EQU 70              ; Phase 1 fuel (drains each frame during stage 1)
-LAND_FUEL_MAX   EQU 10              ; Landing fuel units
+LAND_FUEL_MAX   EQU 28              ; Landing fuel units
 
 *-------------------------------------------------------
 * VARIABLES
@@ -419,16 +419,16 @@ LAND_THRUST:
 
 LAND_LEFT:
     SUB.W   #1,LMU_VX        ; apply leftward velocity impulse
-    CMP.W   #-3,LMU_VX
+    CMP.W   #-4,LMU_VX
     BGE     LAND_DONE
-    MOVE.W  #-3,LMU_VX       ; clamp
+    MOVE.W  #-4,LMU_VX       ; clamp
     BRA     LAND_DONE
 
 LAND_RIGHT:
     ADD.W   #1,LMU_VX        ; apply rightward velocity impulse
-    CMP.W   #3,LMU_VX
+    CMP.W   #4,LMU_VX
     BLE     LAND_DONE
-    MOVE.W  #3,LMU_VX        ; clamp
+    MOVE.W  #4,LMU_VX        ; clamp
     BRA     LAND_DONE
 
 LAND_DONE:
@@ -1033,6 +1033,10 @@ L5: DC.B ' / vv \ ',0
 
     END START
 
+*~Font name~Courier New~
+*~Font size~10~
+*~Tab type~1~
+*~Tab size~4~
 *~Font name~Courier New~
 *~Font size~10~
 *~Tab type~1~
