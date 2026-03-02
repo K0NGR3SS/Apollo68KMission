@@ -34,6 +34,9 @@ LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
 FRAME_DELAY     EQU 15
 LM_WIDTH        EQU 8
 
+FLY_FUEL_MAX    EQU 100             ; Phase 1 fuel (drains each frame)
+LAND_FUEL_MAX   EQU 30              ; Landing fuel units
+
 *-------------------------------------------------------
 * VARIABLES
 *-------------------------------------------------------
@@ -62,6 +65,11 @@ OLD_LMU_Y:      DC.W    0           ; Previous Y for erasing
 GRAV_COUNT:     DC.W    0
                 DS.B    1           ; Padding
 PWD_BUF:        DS.B    8           ; scratch buffer for PRINT_WORD_DEC
+
+; Fuel variables
+FLY_INIT:       DC.W    0           ; 1 once FLY_STATE has been inited
+FLY_FUEL:       DC.W    0           ; Phase 1 fuel remaining
+LAND_FUEL:      DC.W    0           ; Landing fuel remaining
 *-------------------------------------------------------
 * START
 *-------------------------------------------------------
@@ -110,8 +118,21 @@ DO_PAD:
 * PHASE 1: FLIGHT
 *-------------------------------------------------------
 DO_FLY:
-    BSR     SHOW_STATS
+    ; One-time init
+    TST.W   FLY_INIT
+    BNE     SKIP_FLY_INIT
+    MOVE.W  #FLY_FUEL_MAX,FLY_FUEL
+    MOVE.W  #1,FLY_INIT
+SKIP_FLY_INIT:
+
+    BSR     SHOW_FLY_STATS
     ADDQ.W  #1,ALT
+
+    ; Consume fuel each frame
+    SUBQ.W  #1,FLY_FUEL
+    MOVE.W  FLY_FUEL,D0
+    BLE     FLY_FUEL_OUT
+
     BSR     ERASE_ROCKET
     BSR     DRAW_STARS
     MOVE.W  #5,D3
@@ -119,23 +140,49 @@ DO_FLY:
     CMP.W   #45,D0
     BGT     FLY_SEP
     BSR     DRAW_FULL_ROCKET
-    BRA     FLY_STARS
+    BRA     FLY_READ_KEY
 FLY_SEP:
-    BSR     ERASE_ROCKET
     BSR     DRAW_UPPER_STAGE
-FLY_STARS:
+    ; Show jettison hint on bottom row
+    MOVE.W  #$0018,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     JETTISON_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+FLY_READ_KEY:
+    ; Non-blocking key check
+    MOVE.B  #18,D0
+    TRAP    #15
+    CMP.B   #1,D1
+    BNE     FLY_DELAY
+    ; Key 1 pressed: only jettison after stage sep
+    MOVE.W  ALT,D0
+    CMP.W   #45,D0
+    BLE     FLY_DELAY
+    ; --- JETTISON ---
+    BSR     ERASE_UPPER_STAGE
+    BSR     CLEAR_SCREEN
+    CLR.W   FLY_INIT            ; reset flag for replay
+    MOVE.B  #DOCK_STATE,STATE
+    BRA     MAIN_LOOP
+FLY_DELAY:
     MOVE.L  #4,D1
     MOVE.B  #23,D0
     TRAP    #15
-    MOVE.W  ALT,D0
-    CMP.W   #80,D0
-    BGE     GO_DOCK
     BRA     DO_FLY
-GO_DOCK:
-    BSR     ERASE_UPPER_STAGE
+
+FLY_FUEL_OUT:
     BSR     CLEAR_SCREEN
-    MOVE.B  #DOCK_STATE,STATE
-    BRA     MAIN_LOOP
+    MOVE.W  #$050A,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     FLY_FUEL_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.B  #18,D0
+    TRAP    #15
+    BRA     END_GAME
 
 *-------------------------------------------------------
 * PHASE 2: DOCKING
@@ -331,7 +378,10 @@ READ_LANDING_INPUT:
     BRA     LAND_DONE
 
 LAND_THRUST:
-    SUB.W   #3,LMU_VY        ; stronger upward impulse
+    MOVE.W  LAND_FUEL,D0
+    BEQ     LAND_DONE           ; no fuel left - thrust disabled, fall and crash
+    SUBQ.W  #1,LAND_FUEL        ; consume one unit
+    SUB.W   #3,LMU_VY           ; apply upward impulse
     BRA     LAND_DONE
 
 LAND_LEFT:
@@ -362,6 +412,7 @@ INIT_LMU_LANDING:
     MOVE.W  #LMU_START_Y,OLD_LMU_Y
     CLR.W   LMU_VX
     CLR.W   LMU_VY
+    MOVE.W  #LAND_FUEL_MAX,LAND_FUEL    ; fill landing tank
     RTS
 
 *-------------------------------------------------------
@@ -515,7 +566,7 @@ ELU_L:
 SHOW_LANDING_STATS:
     MOVEM.L D0-D1,-(A7)
 
-    ; Blank stats row first to prevent stale digit ghosting
+    ; --- Row 0: blank then reprint VY / X ---
     MOVE.W  #$0000,D1
     MOVE.B  #11,D0
     TRAP    #15
@@ -523,26 +574,36 @@ SHOW_LANDING_STATS:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Reposition and print "VY:" label
     MOVE.W  #$0000,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     VY_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-
-    ; Print vertical velocity value
     MOVE.W  LMU_VY,D1
-    BSR     PRINT_WORD_DEC      ; print via Task 14, stays on display
-
-    ; Print "  X:" after velocity
+    BSR     PRINT_WORD_DEC
     LEA     X_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-
-    ; Print X position
     MOVE.W  LMU_X,D1
-    BSR     PRINT_WORD_DEC      ; print via Task 14, stays on display
+    BSR     PRINT_WORD_DEC
+
+    ; --- Row 1: blank then reprint FUEL ---
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     FUEL_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  LAND_FUEL,D1
+    BSR     PRINT_WORD_DEC
 
     MOVEM.L (A7)+,D0-D1
     RTS
@@ -761,6 +822,37 @@ CLEAR_SCREEN:
     TRAP    #15
     RTS
 
+*-------------------------------------------------------
+* SHOW_FLY_STATS
+* Shows ALTITUDE and FLY_FUEL on the stats row (row 20).
+*-------------------------------------------------------
+SHOW_FLY_STATS:
+    MOVEM.L D0-D1,-(A7)
+    ; Blank row 20
+    MOVE.W  #$0014,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    ; Print ALT:
+    MOVE.W  #$0014,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     ALT_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  ALT,D1
+    BSR     PRINT_WORD_DEC
+    ; Print FUEL:
+    LEA     FLY_FUEL_LBL,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  FLY_FUEL,D1
+    BSR     PRINT_WORD_DEC
+    MOVEM.L (A7)+,D0-D1
+    RTS
+
 SHOW_STATS:
     MOVE.W  #$0014,D1
     MOVE.B  #11,D0
@@ -847,6 +939,10 @@ DOCK_MSG:       DC.B    'Move: 1=Up 2=Dw 3=Lt 4=Rt 5=Dock',0
 BLANKLINE_WIDE: DC.B    '                                        ',0
 VY_MSG:         DC.B    'VY:',0
 X_MSG:          DC.B    '  X:',0
+FUEL_MSG:       DC.B    'FUEL:',0
+FLY_FUEL_LBL:   DC.B    '  FUEL:',0
+JETTISON_MSG:   DC.B    'Press 1 to JETTISON upper stage!',0
+FLY_FUEL_MSG:   DC.B    '*** OUT OF FUEL! MISSION FAILED ***',0
 LAND_SUCCESS:   DC.B    '*** EAGLE HAS LANDED! ***',0
 LAND_CRASH:     DC.B    '*** CRASH LANDING! MISSION FAILED ***',0
 SPACE_LINE:  DC.B '                                                                                ',0                               ',0
@@ -903,12 +999,6 @@ L4: DC.B '  |__|  ',0
 L5: DC.B ' / vv \ ',0
 
     END START
-
-*~Font name~Courier New~
-*~Font size~10~
-*~Tab type~1~
-*~Tab size~4~
-
 
 *~Font name~Courier New~
 *~Font size~10~
