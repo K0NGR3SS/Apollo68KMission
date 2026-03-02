@@ -29,17 +29,10 @@ LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
 LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
 SURFACE_Y       EQU 20              ; Row where moon surface is
-LANDING_ZONE_X1 EQU 25              ; Left edge of safe landing zone
-LANDING_ZONE_X2 EQU 55              ; Right edge of safe landing zone
+LANDING_ZONE_X1 EQU 9              ; Left edge of safe landing zone
+LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
 FRAME_DELAY     EQU 8
-
-; Easy68K screen memory base address
-SCREEN_MEM      EQU $E00000
-SCREEN_COLS     EQU 80
-SCREEN_ROWS     EQU 25
-
-; BG image size: 80 cols x 25 rows, each cell = 2 bytes (char + attribute)
-BG_SIZE         EQU SCREEN_COLS*SCREEN_ROWS*2
+LM_WIDTH        EQU 8
 
 *-------------------------------------------------------
 * VARIABLES
@@ -66,9 +59,6 @@ OLD_LMU_X:      DC.W    0           ; Previous X for erasing
 OLD_LMU_Y:      DC.W    0           ; Previous Y for erasing
 
 ; Button states (set by input handler)
-BUTTON_LEFT:    DC.B    0
-BUTTON_RIGHT:   DC.B    0
-BUTTON_THRUST:  DC.B    0
 GRAV_COUNT:     DC.W    0
                 DS.B    1           ; Padding
 *-------------------------------------------------------
@@ -302,7 +292,7 @@ DO_LANDING:
     ; One-time initialisation
     TST.W   LANDING_INIT
     BNE     SKIP_LANDING_INIT
-    BSR     CLEAR_SCREEN            ; <-- FIX: clear screen on entry
+    BSR     CLEAR_SCREEN
     BSR     DRAW_MOON_SURFACE       ; Draw ASCII moon background once
     BSR     INIT_LMU_LANDING
     MOVE.W  #1,LANDING_INIT
@@ -325,46 +315,32 @@ SKIP_LANDING_INIT:
 READ_LANDING_INPUT:
     MOVEM.L D0-D1,-(A7)
 
-    ; Clear old button states
-    CLR.B   BUTTON_LEFT
-    CLR.B   BUTTON_RIGHT
-    CLR.B   BUTTON_THRUST
+    MOVE.B  #18,D0
+    TRAP    #15        ; D1 = key
 
-    MOVE.B  #19,D0          ; Non-blocking keyboard read
-    TRAP    #15             ; D1 = key code, or 0 if none
+    CMP.B   #1,D1
+    BEQ     LAND_THRUST
+    CMP.B   #3,D1
+    BEQ     LAND_LEFT
+    CMP.B   #4,D1
+    BEQ     LAND_RIGHT
+    BRA     LAND_DONE
 
-    TST.L   D1
-    BEQ     RLI_DONE
+LAND_THRUST:
+    SUB.W   #2,LMU_VY
+    BRA     LAND_DONE
 
-    CMP.B   #'3',D1
-    BEQ     SET_LEFT
-    CMP.B   #'a',D1
-    BEQ     SET_LEFT
-    CMP.B   #'d',D1
-    BEQ     SET_RIGHT
-    CMP.B   #'4',D1
-    BEQ     SET_RIGHT
-    CMP.B   #'w',D1
-    BEQ     SET_THRUST
-    CMP.B   #'1',D1
-    BEQ     SET_THRUST
-    CMP.B   #' ',D1         ; Space bar also fires thrust
-    BEQ     SET_THRUST
-    BRA     RLI_DONE
+LAND_LEFT:
+    SUBQ.W  #2,LMU_X
+    BRA     LAND_DONE
 
-SET_LEFT:
-    MOVE.B  #1,BUTTON_LEFT
-    BRA     RLI_DONE
-SET_RIGHT:
-    MOVE.B  #1,BUTTON_RIGHT
-    BRA     RLI_DONE
-SET_THRUST:
-    MOVE.B  #1,BUTTON_THRUST
+LAND_RIGHT:
+    ADDQ.W  #2,LMU_X
+    BRA     LAND_DONE
 
-RLI_DONE:
+LAND_DONE:
     MOVEM.L (A7)+,D0-D1
     RTS
-
 *-------------------------------------------------------
 * INIT_LMU_LANDING
 * Resets the LMU to starting position with zero velocity.
@@ -380,82 +356,38 @@ INIT_LMU_LANDING:
 
 *-------------------------------------------------------
 * UPDATE_LMU
-* Gravity applies every 4 frames via GRAV_COUNT.
-* Thrust and movement apply every frame.
 *-------------------------------------------------------
 UPDATE_LMU:
     MOVEM.L D0,-(A7)
 
-    ; Save old position for erasing
+    ; Save old position
     MOVE.W  LMU_X,OLD_LMU_X
     MOVE.W  LMU_Y,OLD_LMU_Y
 
-    ; Only apply gravity every 4 frames
-    ADDQ.W  #1,GRAV_COUNT
-    MOVE.W  GRAV_COUNT,D0
-    CMP.W   #4,D0
-    BLT     UL_SKIP_GRAV
-    CLR.W   GRAV_COUNT
+    ; Apply gravity every frame
     ADD.W   #GRAVITY,LMU_VY
-UL_SKIP_GRAV:
 
-    ; Thrust cancels downward velocity (apply every frame)
-    TST.B   BUTTON_THRUST
-    BEQ     UL_NO_THRUST
-    SUB.W   #LMU_THRUST,LMU_VY
-    ; Don't let thrust push upward too fast
-    MOVE.W  LMU_VY,D0
-    CMP.W   #-3,D0
-    BGE     UL_NO_THRUST
-    MOVE.W  #-3,LMU_VY
-UL_NO_THRUST:
-
-    ; Horizontal movement
-    TST.B   BUTTON_LEFT
-    BEQ     UL_NO_LEFT
-    MOVE.W  LMU_VX, D0
-    SUB.W   D0, LMU_X
-UL_NO_LEFT:
-    TST.B   BUTTON_RIGHT
-    BEQ     UL_NO_RIGHT
-    MOVE.W  LMU_VY, D0
-    ADD.W   D0, LMU_Y
-UL_NO_RIGHT:
-
-    ; Clamp horizontal to screen bounds
-    MOVE.W  LMU_X,D0
-    CMP.W   #0,D0
-    BGE     UL_NO_CLAMP_L
-    CLR.W   LMU_X
-UL_NO_CLAMP_L:
-    MOVE.W  LMU_X,D0
-    CMP.W   #SCREEN_WIDTH-8,D0
-    BLE     UL_NO_CLAMP_R
-    MOVE.W  #SCREEN_WIDTH-8,LMU_X
-UL_NO_CLAMP_R:
-
-    ; Terminal velocity cap
+    ; Terminal velocity
     MOVE.W  LMU_VY,D0
     CMP.W   #4,D0
     BLE     UL_NO_CLAMP_V
     MOVE.W  #4,LMU_VY
 UL_NO_CLAMP_V:
 
-    ; Stop going above screen
-    MOVE.W  LMU_Y,D0
-    CMP.W   #0,D0
-    BGE     UL_UPDATE_POS
-    CLR.W   LMU_Y
-    CLR.W   LMU_VY
-UL_UPDATE_POS:
-
     ; Update vertical position
     MOVE.W  LMU_VY,D0
     ADD.W   D0,LMU_Y
 
+    ; Prevent going above screen
+    MOVE.W  LMU_Y,D0
+    CMP.W   #0,D0
+    BGE     UL_DONE
+    CLR.W   LMU_Y
+    CLR.W   LMU_VY
+
+UL_DONE:
     MOVEM.L (A7)+,D0
     RTS
-
 *-------------------------------------------------------
 * DRAW_MOON_SURFACE
 * Draws a full ASCII moon landscape across rows 20-24.
@@ -560,10 +492,6 @@ ELU_L:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
-*-------------------------------------------------------
-* SHOW_LANDING_STATS
-* Displays velocity and position info at top of screen.
-*-------------------------------------------------------
 SHOW_LANDING_STATS:
     MOVEM.L D0-D1,-(A7)
 
@@ -604,28 +532,37 @@ SHOW_LANDING_STATS:
 CHECK_LANDING:
     MOVEM.L D0-D1,-(A7)
 
-    ; LMU bottom = LMU_Y + LM_LAND_H - 1
+    ; Calculate bottom of LMU
     MOVE.W  LMU_Y,D0
-    ADD.W   #LM_LAND_H,D0       ; D0 = row of bottom pixel of LMU
-
+    ADD.W   #LM_LAND_H,D0  
+    
     CMP.W   #SURFACE_Y,D0
-    BLT     CL_DONE             ; Still in the air
+    BLT     CL_DONE
 
-    ; Clamp LMU so it sits exactly on surface, doesn't go through
+    ; Clamp to surface so it doesn't sink
     MOVE.W  #SURFACE_Y,D0
     SUB.W   #LM_LAND_H,D0
     MOVE.W  D0,LMU_Y
-    CLR.W   LMU_VY
 
-    ; Check horizontal position within landing zone
+    ; --- TOUCHDOWN REACHED ---
+    MOVE.W  LMU_VY,D1
+    CMP.W   #2,D1
+    BGT     CL_CRASH        ; Too fast! Crash.
+
     MOVE.W  LMU_X,D0
+
+    ; Left edge check
     CMP.W   #LANDING_ZONE_X1,D0
     BLT     CL_CRASH
-    CMP.W   #LANDING_ZONE_X2,D0
+
+    ; Right edge check
+    MOVE.W  #LANDING_ZONE_X2,D1
+    SUB.W   #LM_WIDTH,D1       ; make sure right side of LM fits
+    CMP.W   D1,D0
     BGT     CL_CRASH
 
-    ; --- SUCCESSFUL LANDING ---
-    MOVEM.L (A7)+,  D0-D1
+    ; --- SUCCESS ---
+    MOVEM.L (A7)+, D0-D1
     BSR     CLEAR_SCREEN
     MOVE.W  #$050A,D1
     MOVE.B  #11,D0
@@ -644,6 +581,7 @@ CL_CRASH:
     LEA     LAND_CRASH,A1
     MOVE.B  #14,D0
     TRAP    #15
+    BRA     CL_END_GAME
 
 CL_END_GAME:
     MOVE.B  #18,D0
@@ -829,8 +767,8 @@ END_GAME:
 STAR:           DC.B    '*',0
 ALT_MSG:        DC.B    'ALTITUDE: ',0
 PROMPT_LAUNCH:  DC.B    '1 to Lift Off!',0
-DOCK_MSG:       DC.B    'Move: 1=Up 2=Dn 3=Lt 4=Rt 5=Dock',0
-BLANKLINE_WIDE: DC.B    '                    ',0
+DOCK_MSG:       DC.B    'Move: 1=Up 2=Dw 3=Lt 4=Rt 5=Dock',0
+BLANKLINE_WIDE: DC.B    '                                        ',0
 VY_MSG:         DC.B    'VY:',0
 X_MSG:          DC.B    '  X:',0
 LAND_SUCCESS:   DC.B    '*** EAGLE HAS LANDED! ***',0
@@ -849,7 +787,6 @@ PTR_LM_LAND: DC.L L1,L2,L3,L4,L5
 
 LM_LAND_H    EQU 5           ; Height of landing LM sprite
 
-; Saturn V rocket lines
 S1:  DC.B '     |     ',0
 S2:  DC.B '     !     ',0
 S3:  DC.B '    / \    ',0
@@ -870,7 +807,6 @@ S17: DC.B ' |_|_A_|_| ',0
 S18: DC.B '   /\|/\   ',0
 S19: DC.B '   V V V   ',0
 
-; CSM lines
 C1: DC.B '   /\   ',0
 C2: DC.B '  /  \  ',0
 C3: DC.B ' |    | ',0
@@ -884,7 +820,7 @@ U3: DC.B ' [    ] ',0
 U4: DC.B '  \__/  ',0
 U5: DC.B '   ''   ',0
 
-L1: DC.B '   __   ',0
+L1: DC.B '   __   ',0 
 L2: DC.B '  /  \  ',0
 L3: DC.B ' [____] ',0
 L4: DC.B '  |__|  ',0
@@ -896,6 +832,8 @@ L5: DC.B ' / vv \ ',0
 *~Font size~10~
 *~Tab type~1~
 *~Tab size~4~
+
+
 *~Font name~Courier New~
 *~Font size~10~
 *~Tab type~1~
