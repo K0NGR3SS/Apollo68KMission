@@ -31,7 +31,7 @@ LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
 SURFACE_Y       EQU 20              ; Row where moon surface is
 LANDING_ZONE_X1 EQU 9              ; Left edge of safe landing zone
 LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
-FRAME_DELAY     EQU 8
+FRAME_DELAY     EQU 15
 LM_WIDTH        EQU 8
 
 *-------------------------------------------------------
@@ -61,6 +61,7 @@ OLD_LMU_Y:      DC.W    0           ; Previous Y for erasing
 ; Button states (set by input handler)
 GRAV_COUNT:     DC.W    0
                 DS.B    1           ; Padding
+PWD_BUF:        DS.B    8           ; scratch buffer for PRINT_WORD_DEC
 *-------------------------------------------------------
 * START
 *-------------------------------------------------------
@@ -298,6 +299,9 @@ DO_LANDING:
     MOVE.W  #1,LANDING_INIT
 SKIP_LANDING_INIT:
 
+    ; Save position BEFORE input so ERASE_LMU always covers the last drawn frame
+    MOVE.W  LMU_X,OLD_LMU_X
+    MOVE.W  LMU_Y,OLD_LMU_Y
     BSR     READ_LANDING_INPUT
     BSR     ERASE_LMU
     BSR     UPDATE_LMU
@@ -327,15 +331,21 @@ READ_LANDING_INPUT:
     BRA     LAND_DONE
 
 LAND_THRUST:
-    SUB.W   #2,LMU_VY
+    SUB.W   #3,LMU_VY        ; stronger upward impulse
     BRA     LAND_DONE
 
 LAND_LEFT:
-    SUBQ.W  #2,LMU_X
+    SUB.W   #1,LMU_VX        ; apply leftward velocity impulse
+    CMP.W   #-3,LMU_VX
+    BGE     LAND_DONE
+    MOVE.W  #-3,LMU_VX       ; clamp
     BRA     LAND_DONE
 
 LAND_RIGHT:
-    ADDQ.W  #2,LMU_X
+    ADD.W   #1,LMU_VX        ; apply rightward velocity impulse
+    CMP.W   #3,LMU_VX
+    BLE     LAND_DONE
+    MOVE.W  #3,LMU_VX        ; clamp
     BRA     LAND_DONE
 
 LAND_DONE:
@@ -360,18 +370,14 @@ INIT_LMU_LANDING:
 UPDATE_LMU:
     MOVEM.L D0,-(A7)
 
-    ; Save old position
-    MOVE.W  LMU_X,OLD_LMU_X
-    MOVE.W  LMU_Y,OLD_LMU_Y
-
     ; Apply gravity every frame
     ADD.W   #GRAVITY,LMU_VY
 
-    ; Terminal velocity
+    ; Terminal velocity (capped at 3 for playability)
     MOVE.W  LMU_VY,D0
-    CMP.W   #4,D0
+    CMP.W   #3,D0
     BLE     UL_NO_CLAMP_V
-    MOVE.W  #4,LMU_VY
+    MOVE.W  #3,LMU_VY
 UL_NO_CLAMP_V:
 
     ; Update vertical position
@@ -381,9 +387,23 @@ UL_NO_CLAMP_V:
     ; Prevent going above screen
     MOVE.W  LMU_Y,D0
     CMP.W   #0,D0
-    BGE     UL_DONE
+    BGE     UL_HORIZ
     CLR.W   LMU_Y
     CLR.W   LMU_VY
+
+UL_HORIZ:
+    ; Apply horizontal velocity
+    MOVE.W  LMU_VX,D0
+    ADD.W   D0,LMU_X
+
+    ; Horizontal friction: drift toward zero by 1 each frame
+    TST.W   LMU_VX
+    BEQ     UL_DONE
+    BPL     UL_VX_POS
+    ADDQ.W  #1,LMU_VX       ; negative VX: nudge toward 0
+    BRA     UL_DONE
+UL_VX_POS:
+    SUBQ.W  #1,LMU_VX       ; positive VX: nudge toward 0
 
 UL_DONE:
     MOVEM.L (A7)+,D0
@@ -495,7 +515,15 @@ ELU_L:
 SHOW_LANDING_STATS:
     MOVEM.L D0-D1,-(A7)
 
-    ; Print "VY:" label at top-left
+    ; Blank stats row first to prevent stale digit ghosting
+    MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    ; Reposition and print "VY:" label
     MOVE.W  #$0000,D1
     MOVE.B  #11,D0
     TRAP    #15
@@ -505,9 +533,7 @@ SHOW_LANDING_STATS:
 
     ; Print vertical velocity value
     MOVE.W  LMU_VY,D1
-    EXT.L   D1
-    MOVE.B  #3,D0
-    TRAP    #15
+    BSR     PRINT_WORD_DEC      ; print via Task 14, stays on display
 
     ; Print "  X:" after velocity
     LEA     X_MSG,A1
@@ -516,9 +542,7 @@ SHOW_LANDING_STATS:
 
     ; Print X position
     MOVE.W  LMU_X,D1
-    EXT.L   D1
-    MOVE.B  #3,D0
-    TRAP    #15
+    BSR     PRINT_WORD_DEC      ; print via Task 14, stays on display
 
     MOVEM.L (A7)+,D0-D1
     RTS
@@ -745,9 +769,7 @@ SHOW_STATS:
     MOVE.B  #14,D0
     TRAP    #15
     MOVE.W  ALT,D1
-    EXT.L   D1
-    MOVE.B  #3,D0
-    TRAP    #15
+    BSR     PRINT_WORD_DEC      ; print via Task 14, stays on display
     RTS
 
 ABS:
@@ -755,6 +777,60 @@ ABS:
     BPL     A_X
     NEG.W   D0
 A_X:
+    RTS
+
+*-------------------------------------------------------
+* PRINT_WORD_DEC
+* Prints D1.W as a signed decimal to the display at the
+* current cursor position using Task 14 only.
+* Modifies D0-D4, A1 (all saved/restored).
+*-------------------------------------------------------
+PRINT_WORD_DEC:
+    MOVEM.L D0-D4/A1,-(A7)
+
+    ; Build string right-to-left in PWD_BUF
+    LEA     PWD_BUF+7,A1
+    MOVE.B  #0,(A1)         ; null terminator
+
+    ; Track sign
+    MOVE.W  D1,D2
+    CLR.B   D3              ; D3=0: positive
+    TST.W   D2
+    BPL     PWD_POS
+    NEG.W   D2
+    MOVE.B  #1,D3           ; D3=1: negative
+PWD_POS:
+    ; Special case: value is zero
+    CMP.W   #0,D2
+    BNE     PWD_DIGITS
+    SUBQ.L  #1,A1
+    MOVE.B  #'0',(A1)
+    BRA     PWD_SIGN
+
+PWD_DIGITS:
+    ; Extract digits least-significant first
+PWD_DIG_LOOP:
+    CLR.L   D4
+    MOVE.W  D2,D4           ; zero-extend to long for DIVU
+    DIVU    #10,D4          ; quotient in low word, remainder in high word
+    MOVE.W  D4,D2           ; save quotient
+    SWAP    D4              ; remainder now in low word
+    ADD.B   #'0',D4         ; convert to ASCII digit
+    SUBQ.L  #1,A1
+    MOVE.B  D4,(A1)         ; store digit
+    TST.W   D2
+    BNE     PWD_DIG_LOOP    ; more digits?
+
+PWD_SIGN:
+    TST.B   D3
+    BEQ     PWD_PRINT
+    SUBQ.L  #1,A1
+    MOVE.B  #'-',(A1)       ; prepend minus sign
+
+PWD_PRINT:
+    MOVE.B  #14,D0
+    TRAP    #15             ; print string at cursor pos on display
+    MOVEM.L (A7)+,D0-D4/A1
     RTS
 
 END_GAME:
