@@ -245,6 +245,13 @@ DOCK_LOOP:
     MOVE.W  #SPRITE_H,D2
     BSR     DRAW_SPRITE
 
+    ; Blank hint row then print DOCK_MSG
+    MOVE.W  #$1500,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
     MOVE.W  #$1500,D1
     MOVE.B  #11,D0
     TRAP    #15
@@ -310,6 +317,13 @@ DO_FLY_DOCKED:
     BNE     DFD_SKIP_CLEAR
     BSR     CLEAR_SCREEN
 DFD_SKIP_CLEAR:
+    ; Blank hint row every frame to wipe any stale content
+    MOVE.W  #$1500,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
     BSR     SHOW_STATS
     ADDQ.W  #1,ALT
     ADDQ.W  #1,DOCKED_ALT
@@ -887,6 +901,15 @@ SHOW_FLY_STATS:
     RTS
 
 SHOW_STATS:
+    MOVEM.L D0-D1,-(A7)
+    ; Blank row 20 first to prevent stale text from previous phases
+    MOVE.W  #$0014,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    ; Reposition and print altitude
     MOVE.W  #$0014,D1
     MOVE.B  #11,D0
     TRAP    #15
@@ -894,7 +917,8 @@ SHOW_STATS:
     MOVE.B  #14,D0
     TRAP    #15
     MOVE.W  ALT,D1
-    BSR     PRINT_WORD_DEC      ; print via Task 14, stays on display
+    BSR     PRINT_WORD_DEC
+    MOVEM.L (A7)+,D0-D1
     RTS
 
 ABS:
