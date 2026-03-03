@@ -1,5 +1,5 @@
 *-----------------------------------------------------------
-* Title      : Apollo 11 Mission
+* Title      : Apollo 68K Mission
 * Written by : Nazariy Buryak
 * Date       : 18/02/2025
 * Description: Apollo 11 Mission
@@ -25,14 +25,18 @@ LMU_START_X     EQU 70              ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
 LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
-SURFACE_Y       EQU 21              ; Row where moon surface is
+SURFACE_Y       EQU 28              ; Row where moon surface is
 LANDING_ZONE_X1 EQU 9               ; Left edge of safe landing zone
 LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
-FRAME_DELAY     EQU 15
+FRAME_DELAY     EQU 80
 LM_WIDTH        EQU 8
+LM_LAND_H       EQU 5               ; Height of landing LM sprite
 
-FLY_FUEL_MAX    EQU 70              ; Phase 1 fuel (drains each frame during stage 1)
-LAND_FUEL_MAX   EQU 28              ; Landing fuel units
+STAGE0_FUEL     EQU 80              ; Fuel for stage 0 (full rocket)
+STAGE1_FUEL     EQU 80              ; Fuel for stage 1 (upper stage)
+SEP0_MIN_FUEL   EQU 10              ; Must have burned to at least this much remaining
+SEP1_MIN_FUEL   EQU 10              ; Must have burned to at least this much remaining
+LAND_FUEL_MAX   EQU 38              ; Landing fuel units
 
 *-------------------------------------------------------
 * VARIABLES
@@ -68,6 +72,8 @@ FLY_INIT:       DC.W    0           ; 1 once FLY_STATE has been inited
 FLY_FUEL:       DC.W    0           ; Phase 1 fuel remaining
 LAND_FUEL:      DC.W    0           ; Landing fuel remaining
 STAGE_SEP:      DC.W    0           ; 0=stage1 active, 1=upper stage flying
+DISOBEYED:      DC.W    0           ; 1 if player ignored Houston warning
+COAST_CTR:      DC.W    0           ; Frame counter for stage 2 disobey
 *-------------------------------------------------------
 * START
 *-------------------------------------------------------
@@ -96,7 +102,6 @@ DO_PAD:
     BSR     CLEAR_SCREEN
     BSR     SHOW_STATS
     BSR     DRAW_STARS
-    MOVE.W  #5,D3
     BSR     DRAW_PAD_ROCKET
 
     MOVE.W  #$0101,D1
@@ -106,57 +111,60 @@ DO_PAD:
     MOVE.B  #14,D0
     TRAP    #15
 
-    MOVE.B  #18,D0
+    ; Wait for '1' using Task 7 (non-blocking check) + Task 5 (read char)
+PAD_WAIT:
+    MOVE.B  #7,D0
     TRAP    #15
+    TST.B   D1
+    BEQ     PAD_WAIT            ; no key yet - keep waiting
+    MOVE.B  #5,D0
+    TRAP    #15
+    CMP.B   #'1',D1
+    BNE     PAD_WAIT            ; wrong key - keep waiting
+
     BSR     CLEAR_SCREEN
     MOVE.B  #FLY_STATE,STATE
     BRA     MAIN_LOOP
 
 *-------------------------------------------------------
 * PHASE 1: FLIGHT
-* Rocket auto-ascends. Press 2 (after ALT>=45) to
-* separate stage 1. Upper stage then flies to ALT 80.
-* Fuel drains only during stage 1. Out of fuel = lose.
+* FLY_FUEL drains every frame in stages 0 and 1.
+* Press 2 any time to separate:
+*   fuel > threshold -> "Too early" warning, no action
+*   fuel in valid window -> separation happens
+*   fuel hits 0 before separating -> game over
 *-------------------------------------------------------
 DO_FLY:
     ; One-time init
     TST.W   FLY_INIT
     BNE     SKIP_FLY_INIT
-    MOVE.W  #FLY_FUEL_MAX,FLY_FUEL
+    MOVE.W  #STAGE0_FUEL,FLY_FUEL
     CLR.W   STAGE_SEP
+    CLR.W   DISOBEYED
+    CLR.W   COAST_CTR
     MOVE.W  #1,FLY_INIT
-    MOVE.W  #$0101,D1
-    MOVE.W  #11,D0
-    TRAP    #15
-    LEA     BLANKLINE_WIDE, A1
-    MOVE.B  #14,D0
-    TRAP    #15
-    
-SKIP_FLY_INIT:
 
+SKIP_FLY_INIT:
     BSR     SHOW_FLY_STATS
     ADDQ.W  #1,ALT
 
-    TST.W   STAGE_SEP
-    BNE     FLY_STAGE2
+    MOVE.W  STAGE_SEP,D0
+    CMP.W   #1,D0
+    BEQ     FLY_STAGE1
+    CMP.W   #2,D0
+    BEQ     FLY_STAGE2
 
-    ; ======= STAGE 1 =======
+    ; ======= STAGE 0 =======
     SUBQ.W  #1,FLY_FUEL
     MOVE.W  FLY_FUEL,D0
     BLE     FLY_FUEL_OUT
 
     BSR     ERASE_ROCKET
     BSR     DRAW_STARS
-    MOVE.W  #5,D3
     BSR     DRAW_FULL_ROCKET
 
-    ; Only allow separation after ALT 45
-    MOVE.W  ALT,D0
-    CMP.W   #45,D0
-    BLT     FLY_S1_DELAY
-
-    ; Show separation prompt at bottom row
-    MOVE.W  #$0018,D1
+    ; Show sep prompt at top of screen
+    MOVE.W  #$0000,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     SEP_MSG,A1
@@ -164,21 +172,179 @@ SKIP_FLY_INIT:
     TRAP    #15
 
     ; Non-blocking key check
-    MOVE.B  #18,D0
+    MOVE.B  #7,D0
     TRAP    #15
-    CMP.B   #2,D1
-    BNE     FLY_S1_DELAY
+    TST.B   D1
+    BEQ     FLY_S0_DELAY
+    MOVE.B  #5,D0
+    TRAP    #15
+    CMP.B   #'2',D1
+    BNE     FLY_S0_DELAY
 
-    ; --- STAGE SEPARATION ---
-    ; Blank the prompt row immediately
-    MOVE.W  #$0018,D1
+    ; Pressed '2' - check if in valid window
+    MOVE.W  FLY_FUEL,D0
+    CMP.W   #SEP0_MIN_FUEL,D0
+    BLE     FLY_S0_DO_SEP
+    ; Too early - Houston warning + choice
+    MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     HOUSTON_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     HOUSTON_OPT,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+FLY_S0_HWAIT:
+    MOVE.B  #7,D0
+    TRAP    #15
+    TST.B   D1
+    BEQ     FLY_S0_HWAIT
+    MOVE.B  #5,D0
+    TRAP    #15
+    CMP.B   #'1',D1
+    BEQ     FLY_S0_DISOBEY         ; proceed despite Houston warning
+    CMP.B   #'2',D1
+    BEQ     FLY_S0_HBACK           ; keep flying
+    BRA     FLY_S0_HWAIT           ; invalid key - ask again
+FLY_S0_DISOBEY:
+    MOVE.W  #1,DISOBEYED
+    BRA     FLY_S0_DO_SEP
+FLY_S0_HBACK:
+    ; Clear warning rows and resume
+    MOVE.W  #$0000,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    BSR     ERASE_ROCKET        ; clear full rocket sprite
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    BRA     FLY_S0_DELAY
+
+FLY_S0_DO_SEP:
+    ; Clear top rows
+    MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    BSR     ERASE_ROCKET
     MOVE.W  #1,STAGE_SEP
+    MOVE.W  #STAGE1_FUEL,FLY_FUEL   ; reset fuel for stage 1
+
+FLY_S0_DELAY:
+    MOVE.L  #4,D1
+    MOVE.B  #23,D0
+    TRAP    #15
+    BRA     DO_FLY
+
+    ; ======= STAGE 1 =======
+FLY_STAGE1:
+    SUBQ.W  #1,FLY_FUEL
+    MOVE.W  FLY_FUEL,D0
+    BLE     FLY_FUEL_OUT
+
+    BSR     ERASE_FIRST_SEP
+    BSR     DRAW_STARS
+    BSR     DRAW_FIRST_SEP
+
+    ; Show sep2 prompt at top of screen
+    MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     SEP2_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    ; Non-blocking key check
+    MOVE.B  #7,D0
+    TRAP    #15
+    TST.B   D1
+    BEQ     FLY_S1_DELAY
+    MOVE.B  #5,D0
+    TRAP    #15
+    CMP.B   #'2',D1
+    BNE     FLY_S1_DELAY
+
+    ; Pressed '2' - check if in valid window
+    MOVE.W  FLY_FUEL,D0
+    CMP.W   #SEP1_MIN_FUEL,D0
+    BLE     FLY_S1_DO_SEP
+    ; Too early - Houston warning + choice
+    MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     HOUSTON_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     HOUSTON_OPT,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+FLY_S1_HWAIT:
+    MOVE.B  #7,D0
+    TRAP    #15
+    TST.B   D1
+    BEQ     FLY_S1_HWAIT
+    MOVE.B  #5,D0
+    TRAP    #15
+    CMP.B   #'1',D1
+    BEQ     FLY_S1_DISOBEY         ; proceed despite Houston warning
+    CMP.B   #'2',D1
+    BEQ     FLY_S1_HBACK           ; keep flying
+    BRA     FLY_S1_HWAIT           ; invalid key - ask again
+FLY_S1_DISOBEY:
+    MOVE.W  #1,DISOBEYED
+    BRA     FLY_S1_DO_SEP
+FLY_S1_HBACK:
+    ; Clear warning rows and resume
+    MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    BRA     FLY_S1_DELAY
+
+FLY_S1_DO_SEP:
+    ; Clear top rows
+    MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.W  #$0001,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    BSR     ERASE_FIRST_SEP
+    MOVE.W  #2,STAGE_SEP
 
 FLY_S1_DELAY:
     MOVE.L  #4,D1
@@ -186,15 +352,22 @@ FLY_S1_DELAY:
     TRAP    #15
     BRA     DO_FLY
 
-    ; ======= STAGE 2 (upper stage) =======
+    ; ======= STAGE 2 (S2-S13+C5+C6, CSM coasting - no fuel drain) =======
 FLY_STAGE2:
-    BSR     ERASE_UPPER_STAGE
+    ; Check if player disobeyed Houston
+    TST.W   DISOBEYED
+    BEQ     FLY_S2_OK
+    ADDQ.W  #1,COAST_CTR
+    MOVE.W  COAST_CTR,D0
+    CMP.W   #60,D0
+    BGE     FLY_DISOBEY_FAIL
+FLY_S2_OK:
+    BSR     ERASE_SECOND_SEP
     BSR     DRAW_STARS
-    MOVE.W  #5,D3
-    BSR     DRAW_UPPER_STAGE
+    BSR     DRAW_SECOND_SEP
 
     MOVE.W  ALT,D0
-    CMP.W   #80,D0
+    CMP.W   #150,D0
     BGE     FLY_GO_DOCK
     MOVE.L  #4,D1
     MOVE.B  #23,D0
@@ -202,7 +375,7 @@ FLY_STAGE2:
     BRA     DO_FLY
 
 FLY_GO_DOCK:
-    BSR     ERASE_UPPER_STAGE
+    BSR     ERASE_SECOND_SEP
     BSR     CLEAR_SCREEN
     CLR.W   FLY_INIT
     CLR.W   STAGE_SEP
@@ -217,7 +390,20 @@ FLY_FUEL_OUT:
     LEA     FLY_FUEL_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.B  #18,D0
+    ; Wait for any key
+    MOVE.B  #5,D0
+    TRAP    #15
+    BRA     END_GAME
+
+FLY_DISOBEY_FAIL:
+    BSR     CLEAR_SCREEN
+    MOVE.W  #$050A,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     DISOBEY_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.B  #5,D0
     TRAP    #15
     BRA     END_GAME
 
@@ -226,36 +412,23 @@ FLY_FUEL_OUT:
 *-------------------------------------------------------
 DO_DOCK:
     BSR     CLEAR_SCREEN
-
-DOCK_LOOP:
     BSR     SHOW_STATS
 
-    ; Erase old CSM position
-    MOVE.W  OLD_CSM_X,D4
-    MOVE.W  OLD_CSM_Y,D3
-    BSR     ERASE_CSM
-
-    ; Draw LM (static)
+    ; Draw LM once (static)
     MOVE.W  LM_X,D4
     MOVE.W  #LM_ROW,D3
     LEA     PTR_LM_UP,A0
     MOVE.W  #SPRITE_H,D2
     BSR     DRAW_SPRITE
 
-    ; Draw CSM (moving)
+    ; Draw CSM at initial position
     MOVE.W  CSM_X,D4
     MOVE.W  CSM_Y,D3
     LEA     PTR_CSM,A0
     MOVE.W  #SPRITE_H,D2
     BSR     DRAW_SPRITE
 
-    ; Blank hint row then print DOCK_MSG
-    MOVE.W  #$1500,D1
-    MOVE.B  #11,D0
-    TRAP    #15
-    LEA     BLANKLINE_WIDE,A1
-    MOVE.B  #14,D0
-    TRAP    #15
+    ; Print DOCK_MSG once
     MOVE.W  #$1500,D1
     MOVE.B  #11,D0
     TRAP    #15
@@ -263,38 +436,66 @@ DOCK_LOOP:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Read keyboard (non-blocking)
-    MOVE.B  #18,D0
+DOCK_LOOP:
+    ; Non-blocking key read for docking
+    MOVE.B  #7,D0
     TRAP    #15
+    TST.B   D1
+    BEQ     DOCK_NO_KEY         ; no key - just delay
+    MOVE.B  #5,D0
+    TRAP    #15                 ; D1.B = ASCII char
 
     ; Save old position before moving
     MOVE.W  CSM_X,OLD_CSM_X
     MOVE.W  CSM_Y,OLD_CSM_Y
 
-    CMP.B   #1,D1
+    CMP.B   #'1',D1
     BEQ     M_U
-    CMP.B   #2,D1
+    CMP.B   #'2',D1
     BEQ     M_S
-    CMP.B   #3,D1
+    CMP.B   #'3',D1
     BEQ     M_L
-    CMP.B   #4,D1
+    CMP.B   #'4',D1
     BEQ     M_R
-    CMP.B   #5,D1
+    CMP.B   #'5',D1
     BEQ     M_D
+
+DOCK_NO_KEY:
+    ; Frame delay
+    MOVE.L  #8,D1
+    MOVE.B  #23,D0
+    TRAP    #15
     BRA     DOCK_LOOP
 
 M_L:
     SUBQ.W  #2,CSM_X
-    BRA     DOCK_LOOP
+    BRA     DOCK_MOVED
 M_R:
     ADDQ.W  #2,CSM_X
-    BRA     DOCK_LOOP
+    BRA     DOCK_MOVED
 M_U:
     SUBQ.W  #1,CSM_Y
-    BRA     DOCK_LOOP
+    BRA     DOCK_MOVED
 M_S:
     ADDQ.W  #1,CSM_Y
-    BRA     DOCK_LOOP
+    BRA     DOCK_MOVED
+
+DOCK_MOVED:
+    ; Erase old CSM
+    BSR     ERASE_CSM
+    ; Draw CSM at new position
+    MOVE.W  CSM_X,D4
+    MOVE.W  CSM_Y,D3
+    LEA     PTR_CSM,A0
+    MOVE.W  #SPRITE_H,D2
+    BSR     DRAW_SPRITE
+    ; Redraw LM in case CSM erased part of it
+    MOVE.W  LM_X,D4
+    MOVE.W  #LM_ROW,D3
+    LEA     PTR_LM_UP,A0
+    MOVE.W  #SPRITE_H,D2
+    BSR     DRAW_SPRITE
+    BRA     DOCK_NO_KEY
 M_D:
     ; Check X alignment
     MOVE.W  CSM_X,D0
@@ -417,14 +618,25 @@ SKIP_LANDING_INIT:
 READ_LANDING_INPUT:
     MOVEM.L D0-D1,-(A7)
 
-    MOVE.B  #18,D0
-    TRAP    #15        ; D1 = key
+    ; Non-blocking key check
+    MOVE.B  #7,D0
+    TRAP    #15
+    TST.B   D1
+    BEQ     LAND_DONE           ; no key - skip
+    MOVE.B  #5,D0
+    TRAP    #15                 ; D1.B = ASCII char
 
-    CMP.B   #1,D1
+    CMP.B   #'w',D1
     BEQ     LAND_THRUST
-    CMP.B   #3,D1
+    CMP.B   #'W',D1
+    BEQ     LAND_THRUST
+    CMP.B   #'a',D1
     BEQ     LAND_LEFT
-    CMP.B   #4,D1
+    CMP.B   #'A',D1
+    BEQ     LAND_LEFT
+    CMP.B   #'d',D1
+    BEQ     LAND_RIGHT
+    CMP.B   #'D',D1
     BEQ     LAND_RIGHT
     BRA     LAND_DONE
 
@@ -519,8 +731,8 @@ UL_DONE:
 DRAW_MOON_SURFACE:
     MOVEM.L D0-D4/A0-A1,-(A7)
 
-    ; Draw space (stars) rows 1-18
-    MOVE.W  #1,D3
+    ; Draw space (stars) rows 3-25
+    MOVE.W  #3,D3
 MS_SPACE_L:
     MOVE.W  #0,D4
     MOVE.W  D4,D1
@@ -532,11 +744,11 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
-    CMP.W   #19,D3
+    CMP.W   #27,D3
     BLT     MS_SPACE_L
 
-    ; Draw surface row 20 (top of terrain)
-    MOVE.W  #20,D3
+    ; Draw surface row 27 (top of terrain)
+    MOVE.W  #27,D3
     MOVE.W  #0,D4
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -547,8 +759,8 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Draw solid moon rows 21-32
-    MOVE.W  #21,D3
+    ; Draw solid moon rows 28-38
+    MOVE.W  #28,D3
 MS_GROUND_L:
     MOVE.W  #0,D4
     MOVE.W  D4,D1
@@ -560,7 +772,7 @@ MS_GROUND_L:
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
-    CMP.W   #32,D3
+    CMP.W   #38,D3
     BLT     MS_GROUND_L
 
     ; Also draw a couple of stars manually
@@ -617,15 +829,23 @@ ELU_L:
 SHOW_LANDING_STATS:
     MOVEM.L D0-D1,-(A7)
 
-    ; --- Row 0: blank then reprint VY / X ---
+    ; --- Row 0: Controls ---
     MOVE.W  #$0000,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     LAND_CTRL_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+
+    ; --- Row 1: VY / X ---
+    MOVE.W  #$0001,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
 
-    MOVE.W  #$0000,D1
+    MOVE.W  #$0001,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     VY_MSG,A1
@@ -639,15 +859,15 @@ SHOW_LANDING_STATS:
     MOVE.W  LMU_X,D1
     BSR     PRINT_WORD_DEC
 
-    ; --- Row 1: blank then reprint FUEL ---
-    MOVE.W  #$0001,D1
+    ; --- Row 2: FUEL ---
+    MOVE.W  #$0002,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
 
-    MOVE.W  #$0001,D1
+    MOVE.W  #$0002,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     FUEL_MSG,A1
@@ -706,6 +926,9 @@ CHECK_LANDING:
     LEA     LAND_SUCCESS,A1
     MOVE.B  #14,D0
     TRAP    #15
+    ; Wait for any key
+    MOVE.B  #5,D0
+    TRAP    #15
     BRA     CL_END_GAME
 
 CL_CRASH:
@@ -720,8 +943,6 @@ CL_CRASH:
     BRA     CL_END_GAME
 
 CL_END_GAME:
-    MOVE.B  #18,D0
-    TRAP    #15
     BRA     END_GAME
 
 CL_DONE:
@@ -730,24 +951,39 @@ CL_DONE:
 *-------------------------------------------------------
 * RENDERING SUBROUTINES
 *-------------------------------------------------------
+; Phase 0 pad rocket: (no flames), col=30, row=3
 DRAW_PAD_ROCKET:
-    LEA     PTR_SATURN,A0
-    MOVE.W  #18,D2
-    MOVE.W  #35,D4
+    LEA     PTR_SAT_PAD,A0
+    MOVE.W  #20,D2          ; rows visible on screen
+    MOVE.W  #3,D3           ; start row (a bit lower for pad look)
+    MOVE.W  #30,D4          ; column
     BSR     DRAW_SPRITE
     RTS
 
+; Phase 1 full rocket: (with flames), col=30, row=1
 DRAW_FULL_ROCKET:
     LEA     PTR_SATURN,A0
-    MOVE.W  #19,D2
-    MOVE.W  #35,D4
+    MOVE.W  #22,D2          ; rows visible on screen (S1-S22)
+    MOVE.W  #1,D3           ; start row (top of screen, higher than pad)
+    MOVE.W  #30,D4          ; column
     BSR     DRAW_SPRITE
     RTS
 
-DRAW_UPPER_STAGE:
-    LEA     PTR_UPPER,A0
-    MOVE.W  #11,D2
-    MOVE.W  #35,D4
+; Phase 1 stage 1 sep: S2-S17+S32-S33 (upper stage+engine), col=30, row=0
+DRAW_FIRST_SEP:
+    LEA     PTR_FIRST_SEP,A0
+    MOVE.W  #18,D2
+    MOVE.W  #1,D3
+    MOVE.W  #30,D4
+    BSR     DRAW_SPRITE
+    RTS
+
+; Phase 1 stage 2 sep: col=30, row=1
+DRAW_SECOND_SEP:
+    LEA     PTR_SECOND_SEP,A0
+    MOVE.W  #14,D2
+    MOVE.W  #1,D3
+    MOVE.W  #30,D4
     BSR     DRAW_SPRITE
     RTS
 
@@ -773,11 +1009,12 @@ DS_L:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
+; Erase full rocket area (col=30, row=1, 23 rows — matches DRAW_FULL_ROCKET row=1+22 +1 buffer)
 ERASE_ROCKET:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #35,D4
-    MOVE.W  #5,D3
-    MOVE.W  #19,D2
+    MOVE.W  #30,D4
+    MOVE.W  #1,D3
+    MOVE.W  #23,D2
     LEA     BLANKLINE_WIDE,A1
 ER_R:
     MOVE.W  D4,D1
@@ -793,13 +1030,14 @@ ER_R:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
-ERASE_UPPER_STAGE:
+; Erase first sep area (col=30, row=1, 19 rows — matches DRAW_FIRST_SEP row=1+18 +1 buffer)
+ERASE_FIRST_SEP:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #35,D4
-    MOVE.W  #5,D3
-    MOVE.W  #11,D2
+    MOVE.W  #30,D4
+    MOVE.W  #1,D3
+    MOVE.W  #19,D2
     LEA     BLANKLINE_WIDE,A1
-ER_UP_L:
+ER_F_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
     OR.B    D3,D1
@@ -809,7 +1047,28 @@ ER_UP_L:
     TRAP    #15
     ADDQ.W  #1,D3
     SUBQ.W  #1,D2
-    BNE     ER_UP_L
+    BNE     ER_F_L
+    MOVEM.L (A7)+,D0-D5/A0-A1
+    RTS
+
+; Erase second sep area (col=30, row=1, 15 rows — matches DRAW_SECOND_SEP row=1+14 +1 buffer)
+ERASE_SECOND_SEP:
+    MOVEM.L D0-D5/A0-A1,-(A7)
+    MOVE.W  #30,D4
+    MOVE.W  #1,D3
+    MOVE.W  #15,D2
+    LEA     BLANKLINE_WIDE,A1
+ER_S_L:
+    MOVE.W  D4,D1
+    LSL.W   #8,D1
+    OR.B    D3,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    MOVE.B  #14,D0
+    TRAP    #15
+    ADDQ.W  #1,D3
+    SUBQ.W  #1,D2
+    BNE     ER_S_L
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
@@ -1006,47 +1265,73 @@ X_MSG:          DC.B    '  X:',0
 FUEL_MSG:       DC.B    'FUEL:',0
 FLY_FUEL_LBL:   DC.B    '  FUEL:',0
 SEP_MSG:        DC.B    'Press 2 to separate stage 1!   ',0
+SEP2_MSG:       DC.B    'Press 2 to separate stage 2!   ',0
+HOUSTON_MSG:    DC.B    'Eagle its Houston, we dont recommend you',0
+HOUSTON_OPT:    DC.B    '1=Proceed  2=Keep Flying',0
+DISOBEY_MSG:    DC.B    'Insufficient altitude - Mission Failed',0
 FLY_FUEL_MSG:   DC.B    '*** OUT OF FUEL! MISSION FAILED ***',0
 LAND_SUCCESS:   DC.B    '*** EAGLE HAS LANDED! ***',0
 LAND_CRASH:     DC.B    '*** CRASH LANDING! MISSION FAILED ***',0
-SPACE_LINE:  DC.B '                                                                                ',0                               ',0
+LAND_CTRL_MSG:  DC.B    'W=Thrust  A=Left  D=Right',0
+SPACE_LINE:  DC.B '                                                                                ',0
 SURFACE_TOP: DC.B '~~~~\/\/\________________________________________/\/\/\/\/\/\/\/\/\/\/\/\/\/~~~~',0
 GROUND_LINE: DC.B '################################################################################',0
 
 ; Sprite pointer tables
-PTR_SATURN:  DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19
-PTR_UPPER:   DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S18,S19
+; Full rocket with flames (S1-S33, phase 1 stage 0)
+PTR_SATURN:    DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19,S20,S21,S22,S23,S24,S25,S26,S27,S28,S29,S30,S31,S32,S33
+; Pad rocket without flames (S1-S32, phase 0)
+PTR_SAT_PAD:   DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19,S20,S21,S22,S23,S24,S25,S26,S27,S28,S29,S30,S31,S32
+; First separation: upper stage S2-S17 + engine flames S32-S33
+PTR_FIRST_SEP: DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S32,S33
+; Second separation: CSM capsule S2-S13 + flames
+PTR_SECOND_SEP: DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S34,S35
+PTR_UPPER:     DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S18,S19
 PTR_CSM:     DC.L C1,C2,C3,C4,C5
 PTR_CSM_FLY: DC.L C1,C2,C3,C4,C5,C6
 PTR_LM_UP:   DC.L U1,U2,U3,U4,U5
 PTR_LM_LAND: DC.L L1,L2,L3,L4,L5
 
-LM_LAND_H    EQU 5           ; Height of landing LM sprite
-
-S1:  DC.B '     |     ',0
-S2:  DC.B '     !     ',0
-S3:  DC.B '    / \    ',0
-S4:  DC.B '   |   |   ',0
-S5:  DC.B '   |   |   ',0
-S6:  DC.B '   |   |   ',0
-S7:  DC.B '   |   |   ',0
-S8:  DC.B '   |   |   ',0
-S9:  DC.B '   |   |   ',0
-S10: DC.B '   |---|   ',0
-S11: DC.B '   | | |   ',0
-S12: DC.B '   | | |   ',0
-S13: DC.B '   | | |   ',0
-S14: DC.B '   | | |   ',0
-S15: DC.B '   | U |   ',0
-S16: DC.B '  /| S |\  ',0
-S17: DC.B ' |_|_A_|_| ',0
-S18: DC.B '   /\|/\   ',0
-S19: DC.B '   V V V   ',0
+S1:  DC.B '       |       ',0
+S2:  DC.B '       !       ',0
+S3:  DC.B '      / \      ',0
+S4:  DC.B '      [ ]      ',0
+S5:  DC.B '     /   \     ',0
+S6:  DC.B '     |   |     ',0
+S7:  DC.B '     |   |     ',0
+S8:  DC.B '     |___|     ',0
+S9:  DC.B '    /__|__\    ',0
+S10: DC.B '    |     |    ',0
+S11: DC.B '    |     |    ',0
+S12: DC.B '    |     |    ',0
+S13: DC.B '    |_____|    ',0
+S14: DC.B '   /       \   ',0
+S15: DC.B '   |       |   ',0
+S16: DC.B '   |_______|   ',0
+S17: DC.B '   | |   | |   ',0
+S18: DC.B '   | |   | |   ',0
+S19: DC.B '   |_|   |_|   ',0
+S20: DC.B '   |       |   ',0
+S21: DC.B '   |       |   ',0
+S22: DC.B '   |       |   ',0
+S23: DC.B '   |       |   ',0
+S24: DC.B '   |       |   ',0
+S25: DC.B '   |_     _|   ',0
+S26: DC.B '   | | U | |   ',0
+S27: DC.B '   | | S | |   ',0
+S28: DC.B '   | | A | |   ',0
+S29: DC.B '   | |   | |   ',0
+S30: DC.B '  /| |   | |\  ',0
+S31: DC.B ' |_|_|___|_|_| ',0
+S32: DC.B '    /\/|\/\    ',0
+S33: DC.B '    VVVVVVV    ',0
+S34: DC.B '      /|\      ',0
+S35: DC.B '      VVV      ',0
 
 C1: DC.B '   /\   ',0
-C2: DC.B '  /  \  ',0
-C3: DC.B ' |    | ',0
-C4: DC.B ' |____| ',0
+C2: DC.B '  /__\  ',0
+C3: DC.B ' |+  +| ',0
+C4: DC.B ' [____] ',0
 C5: DC.B '  /__\  ',0
 C6: DC.B '   VV   ',0
 
