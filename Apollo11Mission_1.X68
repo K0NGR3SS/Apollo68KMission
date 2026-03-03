@@ -20,16 +20,13 @@ CSM_ROW         EQU 10
 LM_ROW          EQU 5
 SPRITE_H        EQU 5
 
-SCREEN_WIDTH    EQU 80
-SCREEN_HEIGHT   EQU 25
-
 ; Landing Module Unit (LMU) constants
 LMU_START_X     EQU 70              ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
 LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
 SURFACE_Y       EQU 21              ; Row where moon surface is
-LANDING_ZONE_X1 EQU 9              ; Left edge of safe landing zone
+LANDING_ZONE_X1 EQU 9               ; Left edge of safe landing zone
 LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
 FRAME_DELAY     EQU 15
 LM_WIDTH        EQU 8
@@ -102,7 +99,7 @@ DO_PAD:
     MOVE.W  #5,D3
     BSR     DRAW_PAD_ROCKET
 
-    MOVE.W  #$1402,D1
+    MOVE.W  #$0101,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     PROMPT_LAUNCH,A1
@@ -128,6 +125,13 @@ DO_FLY:
     MOVE.W  #FLY_FUEL_MAX,FLY_FUEL
     CLR.W   STAGE_SEP
     MOVE.W  #1,FLY_INIT
+    MOVE.W  #$0101,D1
+    MOVE.W  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE, A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    
 SKIP_FLY_INIT:
 
     BSR     SHOW_FLY_STATS
@@ -403,7 +407,7 @@ SKIP_LANDING_INIT:
     BSR     SHOW_LANDING_STATS
     BSR     CHECK_LANDING
 
-    ; Frame delay ? controls game speed / gravity feel
+    ; Frame delay controls game speed / gravity feel
     MOVE.L  #FRAME_DELAY,D1
     MOVE.B  #23,D0
     TRAP    #15
@@ -543,7 +547,7 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Draw solid moon rows 21-24
+    ; Draw solid moon rows 21-32
     MOVE.W  #21,D3
 MS_GROUND_L:
     MOVE.W  #0,D4
@@ -556,7 +560,7 @@ MS_GROUND_L:
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
-    CMP.W   #25,D3
+    CMP.W   #32,D3
     BLT     MS_GROUND_L
 
     ; Also draw a couple of stars manually
@@ -852,10 +856,13 @@ ER_LM_L:
 DRAW_STARS:
     MOVE.W  #$0502,D1
     BSR     P_S
+
     MOVE.W  #$350A,D1
     BSR     P_S
+    
+    MOVE.W  #$2204,D1
+    BSR     P_S
     RTS
-
 P_S:
     MOVE.B  #11,D0
     TRAP    #15
@@ -993,7 +1000,7 @@ STAR:           DC.B    '*',0
 ALT_MSG:        DC.B    'ALTITUDE: ',0
 PROMPT_LAUNCH:  DC.B    '1 to Lift Off!',0
 DOCK_MSG:       DC.B    'Move: 1=Up 2=Dw 3=Lt 4=Rt 5=Dock',0
-BLANKLINE_WIDE: DC.B    '                                        ',0
+BLANKLINE_WIDE: DC.B    '                                                                          ',0
 VY_MSG:         DC.B    'VY:',0
 X_MSG:          DC.B    '  X:',0
 FUEL_MSG:       DC.B    'FUEL:',0
