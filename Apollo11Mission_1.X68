@@ -111,7 +111,6 @@ DO_PAD:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Wait for '1' using Task 7 (non-blocking check) + Task 5 (read char)
 PAD_WAIT:
     MOVE.B  #7,D0
     TRAP    #15
@@ -164,14 +163,13 @@ SKIP_FLY_INIT:
     BSR     DRAW_FULL_ROCKET
 
     ; Show sep prompt at top of screen
-    MOVE.W  #$0000,D1
+    MOVE.W  #$1400,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     SEP_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Non-blocking key check
     MOVE.B  #7,D0
     TRAP    #15
     TST.B   D1
@@ -186,7 +184,7 @@ SKIP_FLY_INIT:
     CMP.W   #SEP0_MIN_FUEL,D0
     BLE     FLY_S0_DO_SEP
     ; Too early - Houston warning + choice
-    MOVE.W  #$0000,D1
+    MOVE.W  #$0014,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_MSG,A1
@@ -352,7 +350,7 @@ FLY_S1_DELAY:
     TRAP    #15
     BRA     DO_FLY
 
-    ; ======= STAGE 2 (S2-S13+C5+C6, CSM coasting - no fuel drain) =======
+    ; ======= STAGE 2  =======
 FLY_STAGE2:
     ; Check if player disobeyed Houston
     TST.W   DISOBEYED
@@ -367,7 +365,7 @@ FLY_S2_OK:
     BSR     DRAW_SECOND_SEP
 
     MOVE.W  ALT,D0
-    CMP.W   #150,D0
+    CMP.W   #180,D0
     BGE     FLY_GO_DOCK
     MOVE.L  #4,D1
     MOVE.B  #23,D0
@@ -724,9 +722,6 @@ UL_DONE:
     RTS
 *-------------------------------------------------------
 * DRAW_MOON_SURFACE
-* Draws a full ASCII moon landscape across rows 20-24.
-* Row 19 = flat landing zone marker.
-* Called once on landing init.
 *-------------------------------------------------------
 DRAW_MOON_SURFACE:
     MOVEM.L D0-D4/A0-A1,-(A7)
@@ -739,6 +734,8 @@ MS_SPACE_L:
     LSL.W   #8,D1
     OR.B    D3,D1
     MOVE.B  #11,D0
+
+
     TRAP    #15
     LEA     SPACE_LINE,A1
     MOVE.B  #14,D0
@@ -747,8 +744,8 @@ MS_SPACE_L:
     CMP.W   #27,D3
     BLT     MS_SPACE_L
 
-    ; Draw surface row 27 (top of terrain)
-    MOVE.W  #27,D3
+    ; Draw surface row 33 (top of terrain)
+    MOVE.W  #33,D3
     MOVE.W  #0,D4
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -759,8 +756,8 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Draw solid moon rows 28-38
-    MOVE.W  #28,D3
+    ; Draw solid moon rows 35-38
+    MOVE.W  #34,D3
 MS_GROUND_L:
     MOVE.W  #0,D4
     MOVE.W  D4,D1
@@ -1009,7 +1006,7 @@ DS_L:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
-; Erase full rocket area (col=30, row=1, 23 rows — matches DRAW_FULL_ROCKET row=1+22 +1 buffer)
+; Erase full rocket area (col=30, row=1, 23 rows ? matches DRAW_FULL_ROCKET row=1+22 +1 buffer)
 ERASE_ROCKET:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
@@ -1030,7 +1027,7 @@ ER_R:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
-; Erase first sep area (col=30, row=1, 19 rows — matches DRAW_FIRST_SEP row=1+18 +1 buffer)
+; Erase first sep area (col=30, row=1, 19 rows ? matches DRAW_FIRST_SEP row=1+18 +1 buffer)
 ERASE_FIRST_SEP:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
@@ -1051,7 +1048,7 @@ ER_F_L:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
-; Erase second sep area (col=30, row=1, 15 rows — matches DRAW_SECOND_SEP row=1+14 +1 buffer)
+; Erase second sep area (col=30, row=1, 15 rows ? matches DRAW_SECOND_SEP row=1+14 +1 buffer)
 ERASE_SECOND_SEP:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
@@ -1266,7 +1263,7 @@ FUEL_MSG:       DC.B    'FUEL:',0
 FLY_FUEL_LBL:   DC.B    '  FUEL:',0
 SEP_MSG:        DC.B    'Press 2 to separate stage 1!   ',0
 SEP2_MSG:       DC.B    'Press 2 to separate stage 2!   ',0
-HOUSTON_MSG:    DC.B    'Eagle its Houston, we dont recommend you',0
+HOUSTON_MSG:    DC.B    'Eagle its Houston, do not proceed with early separation!',0
 HOUSTON_OPT:    DC.B    '1=Proceed  2=Keep Flying',0
 DISOBEY_MSG:    DC.B    'Insufficient altitude - Mission Failed',0
 FLY_FUEL_MSG:   DC.B    '*** OUT OF FUEL! MISSION FAILED ***',0
@@ -1353,6 +1350,7 @@ L5: DC.B ' / vv \ ',0
 *~Font size~10~
 *~Tab type~1~
 *~Tab size~4~
+
 *~Font name~Courier New~
 *~Font size~10~
 *~Tab type~1~
