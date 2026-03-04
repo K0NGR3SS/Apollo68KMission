@@ -138,6 +138,16 @@ DO_FLY:
     CLR.W   DISOBEYED
     CLR.W   COAST_CTR
     MOVE.W  #1,FLY_INIT
+    ; Draw rocket once (static - no need to redraw each frame)
+    BSR     DRAW_STARS
+    BSR     DRAW_FULL_ROCKET
+    ; Show sep prompt once
+    MOVE.W  #$0022,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     SEP_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
 
 SKIP_FLY_INIT:
     ADDQ.W  #1,ALT
@@ -152,18 +162,6 @@ SKIP_FLY_INIT:
     SUBQ.W  #1,FLY_FUEL
     MOVE.W  FLY_FUEL,D0
     BLE     FLY_FUEL_OUT
-
-    BSR     ERASE_ROCKET
-    BSR     DRAW_STARS
-    BSR     DRAW_FULL_ROCKET
-
-    ; Show sep prompt below rocket
-    MOVE.W  #$0022,D1
-    MOVE.B  #11,D0
-    TRAP    #15
-    LEA     SEP_MSG,A1
-    MOVE.B  #14,D0
-    TRAP    #15
 
     MOVE.B  #7,D0
     TRAP    #15
@@ -223,22 +221,38 @@ FLY_S0_HBACK:
     BRA     FLY_S0_DELAY
 
 FLY_S0_DO_SEP:
-    ; Clear prompt rows
+    BSR     ERASE_ROCKET
+    ; Clear prompt/warning rows
     MOVE.W  #$0022,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0023,D1
+    MOVE.W  #$0024,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    BSR     ERASE_ROCKET
+    MOVE.W  #$0025,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
     MOVE.W  #1,STAGE_SEP
     MOVE.W  #STAGE1_FUEL,FLY_FUEL   ; reset fuel for stage 1
+    ; Draw new stage rocket once
+    BSR     DRAW_STARS
+    BSR     DRAW_FIRST_SEP
+    ; Show sep2 prompt once
+    MOVE.W  #$0022,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     SEP2_MSG,A1
+    MOVE.B  #14,D0
+    TRAP    #15
 
 FLY_S0_DELAY:
     BSR     SHOW_FLY_STATS
@@ -252,18 +266,6 @@ FLY_STAGE1:
     SUBQ.W  #1,FLY_FUEL
     MOVE.W  FLY_FUEL,D0
     BLE     FLY_FUEL_OUT
-
-    BSR     ERASE_FIRST_SEP
-    BSR     DRAW_STARS
-    BSR     DRAW_FIRST_SEP
-
-    ; Show sep2 prompt below rocket
-    MOVE.W  #$0022,D1
-    MOVE.B  #11,D0
-    TRAP    #15
-    LEA     SEP2_MSG,A1
-    MOVE.B  #14,D0
-    TRAP    #15
 
     ; Non-blocking key check
     MOVE.B  #7,D0
@@ -324,22 +326,31 @@ FLY_S1_HBACK:
     BRA     FLY_S1_DELAY
 
 FLY_S1_DO_SEP:
-    ; Clear prompt rows
+    BSR     ERASE_FIRST_SEP
+    ; Clear prompt/warning rows
     MOVE.W  #$0022,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0023,D1
+    MOVE.W  #$0024,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    BSR     ERASE_FIRST_SEP
+    MOVE.W  #$0025,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANKLINE_WIDE,A1
+    MOVE.B  #14,D0
+    TRAP    #15
     MOVE.W  #2,STAGE_SEP
     MOVE.W  #STAGE2_FUEL,FLY_FUEL   ; reset fuel for stage 2
+    ; Draw new stage rocket once
+    BSR     DRAW_STARS
+    BSR     DRAW_SECOND_SEP
 
 FLY_S1_DELAY:
     BSR     SHOW_FLY_STATS
@@ -362,10 +373,6 @@ FLY_S2_OK:
     MOVE.W  FLY_FUEL,D0
     BLE     FLY_FUEL_OUT
 
-    BSR     ERASE_SECOND_SEP
-    BSR     DRAW_STARS
-    BSR     DRAW_SECOND_SEP
-
     MOVE.W  ALT,D0
     CMP.W   #180,D0
     BGE     FLY_GO_DOCK
@@ -376,7 +383,6 @@ FLY_S2_OK:
     BRA     DO_FLY
 
 FLY_GO_DOCK:
-    BSR     ERASE_SECOND_SEP
     BSR     CLEAR_SCREEN
     CLR.W   FLY_INIT
     CLR.W   STAGE_SEP
@@ -1168,19 +1174,19 @@ CLEAR_SCREEN:
 
 *-------------------------------------------------------
 * SHOW_FLY_STATS
-* Shows ALTITUDE and FLY_FUEL on the stats row (row 35).
+* Shows ALTITUDE and FLY_FUEL at top-left (row 0, col 0).
 *-------------------------------------------------------
 SHOW_FLY_STATS:
     MOVEM.L D0-D1,-(A7)
-    ; Blank row 35
-    MOVE.W  #$0023,D1
+    ; Blank row 0 stats area
+    MOVE.W  #$0000,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
     ; Print ALT:
-    MOVE.W  #$0023,D1
+    MOVE.W  #$0000,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     ALT_MSG,A1
