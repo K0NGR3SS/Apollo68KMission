@@ -16,7 +16,6 @@ DOCK_STATE      EQU 2
 FLY_DOCKED      EQU 3
 LAND_STAGE      EQU 4
 
-CSM_ROW         EQU 10
 LM_ROW          EQU 5
 SPRITE_H        EQU 5
 
@@ -24,7 +23,6 @@ SPRITE_H        EQU 5
 LMU_START_X     EQU 70              ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
-LMU_THRUST      EQU 2               ; Thrust power (opposes gravity)
 SURFACE_Y       EQU 28              ; Row where moon surface is
 LANDING_ZONE_X1 EQU 9               ; Left edge of safe landing zone
 LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
@@ -34,6 +32,7 @@ LM_LAND_H       EQU 5               ; Height of landing LM sprite
 
 STAGE0_FUEL     EQU 80              ; Fuel for stage 0 (full rocket)
 STAGE1_FUEL     EQU 80              ; Fuel for stage 1 (upper stage)
+STAGE2_FUEL     EQU 50              ; Fuel for stage 2 (coast to orbit)
 SEP0_MIN_FUEL   EQU 10              ; Must have burned to at least this much remaining
 SEP1_MIN_FUEL   EQU 10              ; Must have burned to at least this much remaining
 LAND_FUEL_MAX   EQU 38              ; Landing fuel units
@@ -62,9 +61,6 @@ LMU_VY:         DC.W    0           ; Vertical velocity
 OLD_LMU_X:      DC.W    0           ; Previous X for erasing
 OLD_LMU_Y:      DC.W    0           ; Previous Y for erasing
 
-; Button states (set by input handler)
-GRAV_COUNT:     DC.W    0
-                DS.B    1           ; Padding
 PWD_BUF:        DS.B    8           ; scratch buffer for PRINT_WORD_DEC
 
 ; Fuel variables
@@ -144,7 +140,6 @@ DO_FLY:
     MOVE.W  #1,FLY_INIT
 
 SKIP_FLY_INIT:
-    BSR     SHOW_FLY_STATS
     ADDQ.W  #1,ALT
 
     MOVE.W  STAGE_SEP,D0
@@ -246,6 +241,7 @@ FLY_S0_DO_SEP:
     MOVE.W  #STAGE1_FUEL,FLY_FUEL   ; reset fuel for stage 1
 
 FLY_S0_DELAY:
+    BSR     SHOW_FLY_STATS
     MOVE.L  #4,D1
     MOVE.B  #23,D0
     TRAP    #15
@@ -343,8 +339,10 @@ FLY_S1_DO_SEP:
     TRAP    #15
     BSR     ERASE_FIRST_SEP
     MOVE.W  #2,STAGE_SEP
+    MOVE.W  #STAGE2_FUEL,FLY_FUEL   ; reset fuel for stage 2
 
 FLY_S1_DELAY:
+    BSR     SHOW_FLY_STATS
     MOVE.L  #4,D1
     MOVE.B  #23,D0
     TRAP    #15
@@ -360,6 +358,10 @@ FLY_STAGE2:
     CMP.W   #60,D0
     BGE     FLY_DISOBEY_FAIL
 FLY_S2_OK:
+    SUBQ.W  #1,FLY_FUEL
+    MOVE.W  FLY_FUEL,D0
+    BLE     FLY_FUEL_OUT
+
     BSR     ERASE_SECOND_SEP
     BSR     DRAW_STARS
     BSR     DRAW_SECOND_SEP
@@ -367,6 +369,7 @@ FLY_S2_OK:
     MOVE.W  ALT,D0
     CMP.W   #180,D0
     BGE     FLY_GO_DOCK
+    BSR     SHOW_FLY_STATS
     MOVE.L  #4,D1
     MOVE.B  #23,D0
     TRAP    #15
@@ -440,8 +443,19 @@ DOCK_LOOP:
     TRAP    #15
     TST.B   D1
     BEQ     DOCK_NO_KEY         ; no key - just delay
+    ; Move cursor to safe spot before reading (task 5 echoes)
+    MOVE.W  #$0018,D1
+    MOVE.B  #11,D0
+    TRAP    #15
     MOVE.B  #5,D0
     TRAP    #15                 ; D1.B = ASCII char
+    ; Erase the echoed character
+    MOVE.W  #$0018,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANK_SMALL,A1
+    MOVE.B  #14,D0
+    TRAP    #15
 
     ; Save old position before moving
     MOVE.W  CSM_X,OLD_CSM_X
@@ -479,6 +493,32 @@ M_S:
     BRA     DOCK_MOVED
 
 DOCK_MOVED:
+    ; --- Collision check: CSM vs LM bounding boxes ---
+    ; LM: cols LM_X..LM_X+7, rows LM_ROW..LM_ROW+4
+    ; CSM: cols CSM_X..CSM_X+7, rows CSM_Y..CSM_Y+4
+    ; Horizontal: CSM_X+8 <= LM_X  -> no overlap
+    MOVE.W  CSM_X,D0
+    ADD.W   #8,D0
+    CMP.W   LM_X,D0
+    BLE     DOCK_NO_COLL
+    ; Horizontal: LM_X+8 <= CSM_X  -> no overlap
+    MOVE.W  LM_X,D0
+    ADD.W   #8,D0
+    CMP.W   CSM_X,D0
+    BLE     DOCK_NO_COLL
+    ; Vertical: CSM_Y+5 <= LM_ROW  -> no overlap
+    MOVE.W  CSM_Y,D0
+    ADD.W   #SPRITE_H,D0
+    CMP.W   #LM_ROW,D0
+    BLE     DOCK_NO_COLL
+    ; Vertical: LM_ROW+5 <= CSM_Y  -> no overlap (CSM below LM = valid approach)
+    MOVE.W  #LM_ROW,D0
+    ADD.W   #SPRITE_H,D0
+    CMP.W   CSM_Y,D0
+    BLE     DOCK_NO_COLL
+    ; COLLISION - Houston we have a problem!
+    BRA     DOCK_CRASH
+DOCK_NO_COLL:
     ; Erase old CSM
     BSR     ERASE_CSM
     ; Draw CSM at new position
@@ -511,6 +551,18 @@ D_OK:
     CLR.W   DOCKED_ALT
     MOVE.B  #FLY_DOCKED,STATE
     BRA     MAIN_LOOP
+
+DOCK_CRASH:
+    BSR     CLEAR_SCREEN
+    MOVE.W  #$050A,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     HOUSTON_PROB,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    MOVE.B  #5,D0
+    TRAP    #15
+    BRA     END_GAME
 
 *-------------------------------------------------------
 * PHASE 3: JOINT FLIGHT (DOCKED)
@@ -574,7 +626,7 @@ EJ_L:
     OR.B    D3,D1
     MOVE.B  #11,D0
     TRAP    #15
-    LEA     BLANKLINE_WIDE,A1
+    LEA     BLANK_SMALL,A1
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
@@ -814,7 +866,7 @@ ELU_L:
     OR.B    D3,D1
     MOVE.B  #11,D0
     TRAP    #15
-    LEA     BLANKLINE_WIDE,A1
+    LEA     BLANK_SMALL,A1
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
@@ -951,8 +1003,8 @@ CL_DONE:
 ; Phase 0 pad rocket: (no flames), col=30, row=3
 DRAW_PAD_ROCKET:
     LEA     PTR_SAT_PAD,A0
-    MOVE.W  #20,D2          ; rows visible on screen
-    MOVE.W  #3,D3           ; start row (a bit lower for pad look)
+    MOVE.W  #32,D2          ; rows visible on screen (full rocket)
+    MOVE.W  #1,D3           ; start row
     MOVE.W  #30,D4          ; column
     BSR     DRAW_SPRITE
     RTS
@@ -960,8 +1012,8 @@ DRAW_PAD_ROCKET:
 ; Phase 1 full rocket: (with flames), col=30, row=1
 DRAW_FULL_ROCKET:
     LEA     PTR_SATURN,A0
-    MOVE.W  #22,D2          ; rows visible on screen (S1-S22)
-    MOVE.W  #1,D3           ; start row (top of screen, higher than pad)
+    MOVE.W  #33,D2          ; rows visible on screen (S1-S33, full rocket+flames)
+    MOVE.W  #1,D3           ; start row
     MOVE.W  #30,D4          ; column
     BSR     DRAW_SPRITE
     RTS
@@ -1006,13 +1058,13 @@ DS_L:
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
-; Erase full rocket area (col=30, row=1, 23 rows ? matches DRAW_FULL_ROCKET row=1+22 +1 buffer)
+; Erase full rocket area (col=30, row=1, 34 rows to cover 33-row rocket + buffer)
 ERASE_ROCKET:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
     MOVE.W  #1,D3
-    MOVE.W  #23,D2
-    LEA     BLANKLINE_WIDE,A1
+    MOVE.W  #34,D2
+    LEA     BLANK_ROCKET,A1
 ER_R:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -1033,7 +1085,7 @@ ERASE_FIRST_SEP:
     MOVE.W  #30,D4
     MOVE.W  #1,D3
     MOVE.W  #19,D2
-    LEA     BLANKLINE_WIDE,A1
+    LEA     BLANK_ROCKET,A1
 ER_F_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -1054,7 +1106,7 @@ ERASE_SECOND_SEP:
     MOVE.W  #30,D4
     MOVE.W  #1,D3
     MOVE.W  #15,D2
-    LEA     BLANKLINE_WIDE,A1
+    LEA     BLANK_ROCKET,A1
 ER_S_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -1074,7 +1126,7 @@ ERASE_CSM:
     MOVE.W  OLD_CSM_X,D4
     MOVE.W  OLD_CSM_Y,D3
     MOVE.W  #SPRITE_H,D2
-    LEA     BLANKLINE_WIDE,A1
+    LEA     BLANK_SMALL,A1
 ER_CSM_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -1086,26 +1138,6 @@ ER_CSM_L:
     ADDQ.W  #1,D3
     SUBQ.W  #1,D2
     BNE     ER_CSM_L
-    MOVEM.L (A7)+,D0-D5/A0-A1
-    RTS
-
-ERASE_LM:
-    MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  LM_X,D4
-    MOVE.W  #LM_ROW,D3
-    MOVE.W  #SPRITE_H,D2
-    LEA     BLANKLINE_WIDE,A1
-ER_LM_L:
-    MOVE.W  D4,D1
-    LSL.W   #8,D1
-    OR.B    D3,D1
-    MOVE.B  #11,D0
-    TRAP    #15
-    MOVE.B  #14,D0
-    TRAP    #15
-    ADDQ.W  #1,D3
-    SUBQ.W  #1,D2
-    BNE     ER_LM_L
     MOVEM.L (A7)+,D0-D5/A0-A1
     RTS
 
@@ -1269,6 +1301,9 @@ DISOBEY_MSG:    DC.B    'Insufficient altitude - Mission Failed',0
 FLY_FUEL_MSG:   DC.B    '*** OUT OF FUEL! MISSION FAILED ***',0
 LAND_SUCCESS:   DC.B    '*** EAGLE HAS LANDED! ***',0
 LAND_CRASH:     DC.B    '*** CRASH LANDING! MISSION FAILED ***',0
+HOUSTON_PROB:   DC.B    'Houston, we have a problem!',0
+BLANK_ROCKET:   DC.B    '                ',0
+BLANK_SMALL:    DC.B    '          ',0
 LAND_CTRL_MSG:  DC.B    'W=Thrust  A=Left  D=Right',0
 SPACE_LINE:  DC.B '                                                                                ',0
 SURFACE_TOP: DC.B '~~~~\/\/\________________________________________/\/\/\/\/\/\/\/\/\/\/\/\/\/~~~~',0
@@ -1283,7 +1318,6 @@ PTR_SAT_PAD:   DC.L S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S
 PTR_FIRST_SEP: DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S32,S33
 ; Second separation: CSM capsule S2-S13 + flames
 PTR_SECOND_SEP: DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S34,S35
-PTR_UPPER:     DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S18,S19
 PTR_CSM:     DC.L C1,C2,C3,C4,C5
 PTR_CSM_FLY: DC.L C1,C2,C3,C4,C5,C6
 PTR_LM_UP:   DC.L U1,U2,U3,U4,U5
