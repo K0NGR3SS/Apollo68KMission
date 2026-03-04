@@ -157,8 +157,8 @@ SKIP_FLY_INIT:
     BSR     DRAW_STARS
     BSR     DRAW_FULL_ROCKET
 
-    ; Show sep prompt at top of screen
-    MOVE.W  #$1400,D1
+    ; Show sep prompt below rocket
+    MOVE.W  #$0022,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     SEP_MSG,A1
@@ -179,13 +179,13 @@ SKIP_FLY_INIT:
     CMP.W   #SEP0_MIN_FUEL,D0
     BLE     FLY_S0_DO_SEP
     ; Too early - Houston warning + choice
-    MOVE.W  #$0014,D1
+    MOVE.W  #$0024,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0001,D1
+    MOVE.W  #$0025,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_OPT,A1
@@ -208,13 +208,13 @@ FLY_S0_DISOBEY:
     BRA     FLY_S0_DO_SEP
 FLY_S0_HBACK:
     ; Clear warning rows and resume
-    MOVE.W  #$0000,D1
+    MOVE.W  #$0024,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0001,D1
+    MOVE.W  #$0025,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -223,14 +223,14 @@ FLY_S0_HBACK:
     BRA     FLY_S0_DELAY
 
 FLY_S0_DO_SEP:
-    ; Clear top rows
-    MOVE.W  #$0000,D1
+    ; Clear prompt rows
+    MOVE.W  #$0022,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0001,D1
+    MOVE.W  #$0023,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -257,8 +257,8 @@ FLY_STAGE1:
     BSR     DRAW_STARS
     BSR     DRAW_FIRST_SEP
 
-    ; Show sep2 prompt at top of screen
-    MOVE.W  #$0000,D1
+    ; Show sep2 prompt below rocket
+    MOVE.W  #$0022,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     SEP2_MSG,A1
@@ -280,13 +280,13 @@ FLY_STAGE1:
     CMP.W   #SEP1_MIN_FUEL,D0
     BLE     FLY_S1_DO_SEP
     ; Too early - Houston warning + choice
-    MOVE.W  #$0000,D1
+    MOVE.W  #$0024,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0001,D1
+    MOVE.W  #$0025,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_OPT,A1
@@ -309,13 +309,13 @@ FLY_S1_DISOBEY:
     BRA     FLY_S1_DO_SEP
 FLY_S1_HBACK:
     ; Clear warning rows and resume
-    MOVE.W  #$0000,D1
+    MOVE.W  #$0024,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0001,D1
+    MOVE.W  #$0025,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -324,14 +324,14 @@ FLY_S1_HBACK:
     BRA     FLY_S1_DELAY
 
 FLY_S1_DO_SEP:
-    ; Clear top rows
-    MOVE.W  #$0000,D1
+    ; Clear prompt rows
+    MOVE.W  #$0022,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0001,D1
+    MOVE.W  #$0023,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -449,6 +449,7 @@ DOCK_LOOP:
     TRAP    #15
     MOVE.B  #5,D0
     TRAP    #15                 ; D1.B = ASCII char
+    MOVE.B  D1,D2              ; SAVE key in D2 before clobbering D1
     ; Erase the echoed character
     MOVE.W  #$0018,D1
     MOVE.B  #11,D0
@@ -456,6 +457,7 @@ DOCK_LOOP:
     LEA     BLANK_SMALL,A1
     MOVE.B  #14,D0
     TRAP    #15
+    MOVE.B  D2,D1              ; RESTORE key from D2
 
     ; Save old position before moving
     MOVE.W  CSM_X,OLD_CSM_X
@@ -1166,19 +1168,19 @@ CLEAR_SCREEN:
 
 *-------------------------------------------------------
 * SHOW_FLY_STATS
-* Shows ALTITUDE and FLY_FUEL on the stats row (row 20).
+* Shows ALTITUDE and FLY_FUEL on the stats row (row 35).
 *-------------------------------------------------------
 SHOW_FLY_STATS:
     MOVEM.L D0-D1,-(A7)
-    ; Blank row 20
-    MOVE.W  #$0014,D1
+    ; Blank row 35
+    MOVE.W  #$0023,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
     ; Print ALT:
-    MOVE.W  #$0014,D1
+    MOVE.W  #$0023,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     ALT_MSG,A1
