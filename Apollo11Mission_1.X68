@@ -100,7 +100,7 @@ DO_PAD:
     BSR     DRAW_STARS
     BSR     DRAW_PAD_ROCKET
 
-    MOVE.W  #$0101,D1
+    MOVE.W  #$1922,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     PROMPT_LAUNCH,A1
@@ -472,13 +472,23 @@ DOCK_LOOP:
 
     CMP.B   #'w',D1
     BEQ     M_U
+    CMP.B   #'W',D1
+    BEQ     M_U
     CMP.B   #'s',D1
+    BEQ     M_S
+    CMP.B   #'S',D1
     BEQ     M_S
     CMP.B   #'a',D1
     BEQ     M_L
+    CMP.B   #'A',D1
+    BEQ     M_L
     CMP.B   #'d',D1
     BEQ     M_R
+    CMP.B   #'D',D1
+    BEQ     M_R
     CMP.B   #'e',D1
+    BEQ     M_D
+    CMP.B   #'E',D1
     BEQ     M_D
 
 DOCK_NO_KEY:
