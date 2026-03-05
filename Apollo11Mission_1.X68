@@ -20,12 +20,12 @@ LM_ROW          EQU 5
 SPRITE_H        EQU 5
 
 ; Landing Module Unit (LMU) constants
-LMU_START_X     EQU 70              ; Spawn in right corner of screen
+LMU_START_X     EQU 160             ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
-SURFACE_Y       EQU 28              ; Row where moon surface is
-LANDING_ZONE_X1 EQU 9               ; Left edge of safe landing zone
-LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
+SURFACE_Y       EQU 50              ; Row where moon surface is
+LANDING_ZONE_X1 EQU 45              ; Left edge of safe landing zone
+LANDING_ZONE_X2 EQU 145             ; Right edge of safe landing zone
 FRAME_DELAY     EQU 80
 LM_WIDTH        EQU 8
 LM_LAND_H       EQU 5               ; Height of landing LM sprite
@@ -45,11 +45,11 @@ LAND_FUEL_MAX   EQU 38              ; Landing fuel units
 STATE:          DC.B    0
                 DS.B    1           ; Padding for word alignment
 ALT:            DC.W    0
-CSM_X:          DC.W    10
-OLD_CSM_X:      DC.W    10
+CSM_X:          DC.W    50
+OLD_CSM_X:      DC.W    50
 CSM_Y:          DC.W    12
 OLD_CSM_Y:      DC.W    12
-LM_X:           DC.W    40
+LM_X:           DC.W    100
 DOCKED_ALT:     DC.W    0
 LANDING_INIT:   DC.W    0
 
@@ -505,14 +505,14 @@ DOCK_MOVED:
     ; --- Collision check: CSM vs LM bounding boxes ---
     ; LM: cols LM_X..LM_X+7, rows LM_ROW..LM_ROW+4
     ; CSM: cols CSM_X..CSM_X+7, rows CSM_Y..CSM_Y+4
-    ; Horizontal: CSM_X+7 <= LM_X  -> no overlap
+    ; Horizontal: CSM_X+6 <= LM_X  -> no overlap
     MOVE.W  CSM_X,D0
-    ADD.W   #7,D0
+    ADD.W   #6,D0
     CMP.W   LM_X,D0
     BLE     DOCK_NO_COLL
-    ; Horizontal: LM_X+7 <= CSM_X  -> no overlap
+    ; Horizontal: LM_X+6 <= CSM_X  -> no overlap
     MOVE.W  LM_X,D0
-    ADD.W   #7,D0
+    ADD.W   #6,D0
     CMP.W   CSM_X,D0
     BLE     DOCK_NO_COLL
     ; Vertical: CSM_Y+5 <= LM_ROW  -> no overlap
@@ -557,6 +557,7 @@ M_D:
     CMP.W   #1,D0
     BGT     DOCK_LOOP
 D_OK:
+    BSR     CLEAR_SCREEN
     CLR.W   DOCKED_ALT
     MOVE.B  #FLY_DOCKED,STATE
     BRA     MAIN_LOOP
@@ -612,7 +613,7 @@ GO_LAND:
 
 DRAW_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #30,D4
+    MOVE.W  #80,D4
     MOVE.W  #5,D3
     LEA     PTR_LM_UP,A0
     MOVE.W  #5,D2
@@ -626,9 +627,9 @@ DRAW_JOINT:
 
 ERASE_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #30,D4
+    MOVE.W  #80,D4
     MOVE.W  #4,D3
-    MOVE.W  #10,D2
+    MOVE.W  #12,D2
 EJ_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -787,7 +788,7 @@ UL_DONE:
 DRAW_MOON_SURFACE:
     MOVEM.L D0-D4/A0-A1,-(A7)
 
-    ; Draw space (stars) rows 3-25
+    ; Draw space (stars) rows 3-49
     MOVE.W  #3,D3
 MS_SPACE_L:
     MOVE.W  #0,D4
@@ -802,11 +803,11 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
-    CMP.W   #27,D3
+    CMP.W   #50,D3
     BLT     MS_SPACE_L
 
-    ; Draw surface row 33 (top of terrain)
-    MOVE.W  #33,D3
+    ; Draw surface row 50 (top of terrain)
+    MOVE.W  #50,D3
     MOVE.W  #0,D4
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -817,8 +818,8 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Draw solid moon rows 35-38
-    MOVE.W  #34,D3
+    ; Draw solid moon rows 51-59
+    MOVE.W  #51,D3
 MS_GROUND_L:
     MOVE.W  #0,D4
     MOVE.W  D4,D1
@@ -830,7 +831,7 @@ MS_GROUND_L:
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
-    CMP.W   #38,D3
+    CMP.W   #60,D3
     BLT     MS_GROUND_L
 
     ; Also draw a couple of stars manually
@@ -1314,9 +1315,9 @@ HOUSTON_PROB:   DC.B    'Houston, we have a problem!',0
 BLANK_ROCKET:   DC.B    '                ',0
 BLANK_SMALL:    DC.B    '          ',0
 LAND_CTRL_MSG:  DC.B    'W=Thrust  A=Left  D=Right',0
-SPACE_LINE:  DC.B '                                                                                ',0
-SURFACE_TOP: DC.B '~~~~\/\/\________________________________________/\/\/\/\/\/\/\/\/\/\/\/\/\/~~~~',0
-GROUND_LINE: DC.B '################################################################################',0
+SPACE_LINE:  DC.B '                                                                                                                                                                                                ',0
+SURFACE_TOP: DC.B '~~~~\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\____________________________________________________________________________________________________/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/~~~~',0
+GROUND_LINE: DC.B '################################################################################################################################################################################################',0
 
 ; Sprite pointer tables
 ; Full rocket with flames (S1-S33, phase 1 stage 0)
