@@ -20,12 +20,12 @@ LM_ROW          EQU 5
 SPRITE_H        EQU 5
 
 ; Landing Module Unit (LMU) constants
-LMU_START_X     EQU 160             ; Spawn in right corner of screen
+LMU_START_X     EQU 70              ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
-SURFACE_Y       EQU 50              ; Row where moon surface is
-LANDING_ZONE_X1 EQU 45              ; Left edge of safe landing zone
-LANDING_ZONE_X2 EQU 145             ; Right edge of safe landing zone
+SURFACE_Y       EQU 28              ; Row where moon surface is
+LANDING_ZONE_X1 EQU 9               ; Left edge of safe landing zone
+LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
 FRAME_DELAY     EQU 80
 LM_WIDTH        EQU 8
 LM_LAND_H       EQU 5               ; Height of landing LM sprite
@@ -45,11 +45,11 @@ LAND_FUEL_MAX   EQU 38              ; Landing fuel units
 STATE:          DC.B    0
                 DS.B    1           ; Padding for word alignment
 ALT:            DC.W    0
-CSM_X:          DC.W    50
-OLD_CSM_X:      DC.W    50
+CSM_X:          DC.W    10
+OLD_CSM_X:      DC.W    10
 CSM_Y:          DC.W    12
 OLD_CSM_Y:      DC.W    12
-LM_X:           DC.W    100
+LM_X:           DC.W    40
 DOCKED_ALT:     DC.W    0
 LANDING_INIT:   DC.W    0
 
@@ -613,7 +613,7 @@ GO_LAND:
 
 DRAW_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #80,D4
+    MOVE.W  #30,D4
     MOVE.W  #5,D3
     LEA     PTR_LM_UP,A0
     MOVE.W  #5,D2
@@ -627,7 +627,7 @@ DRAW_JOINT:
 
 ERASE_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
-    MOVE.W  #80,D4
+    MOVE.W  #30,D4
     MOVE.W  #4,D3
     MOVE.W  #12,D2
 EJ_L:
@@ -788,7 +788,7 @@ UL_DONE:
 DRAW_MOON_SURFACE:
     MOVEM.L D0-D4/A0-A1,-(A7)
 
-    ; Draw space (stars) rows 3-49
+    ; Draw space (stars) rows 3-25
     MOVE.W  #3,D3
 MS_SPACE_L:
     MOVE.W  #0,D4
@@ -803,11 +803,11 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
-    CMP.W   #50,D3
+    CMP.W   #27,D3
     BLT     MS_SPACE_L
 
-    ; Draw surface row 50 (top of terrain)
-    MOVE.W  #50,D3
+    ; Draw surface row 28 (top of terrain)
+    MOVE.W  #28,D3
     MOVE.W  #0,D4
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -818,8 +818,8 @@ MS_SPACE_L:
     MOVE.B  #14,D0
     TRAP    #15
 
-    ; Draw solid moon rows 51-59
-    MOVE.W  #51,D3
+    ; Draw solid moon rows 29-38
+    MOVE.W  #29,D3
 MS_GROUND_L:
     MOVE.W  #0,D4
     MOVE.W  D4,D1
@@ -831,7 +831,7 @@ MS_GROUND_L:
     MOVE.B  #14,D0
     TRAP    #15
     ADDQ.W  #1,D3
-    CMP.W   #60,D3
+    CMP.W   #38,D3
     BLT     MS_GROUND_L
 
     ; Also draw a couple of stars manually
@@ -1315,9 +1315,9 @@ HOUSTON_PROB:   DC.B    'Houston, we have a problem!',0
 BLANK_ROCKET:   DC.B    '                ',0
 BLANK_SMALL:    DC.B    '          ',0
 LAND_CTRL_MSG:  DC.B    'W=Thrust  A=Left  D=Right',0
-SPACE_LINE:  DC.B '                                                                                                                                                                                                ',0
-SURFACE_TOP: DC.B '~~~~\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\____________________________________________________________________________________________________/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/~~~~',0
-GROUND_LINE: DC.B '################################################################################################################################################################################################',0
+SPACE_LINE:  DC.B '                                                                                ',0
+SURFACE_TOP: DC.B '~~~~\/\/\________________________________________/\/\/\/\/\/\/\/\/\/\/\/\/\/~~~~',0
+GROUND_LINE: DC.B '################################################################################',0
 
 ; Sprite pointer tables
 ; Full rocket with flames (S1-S33, phase 1 stage 0)
@@ -1331,7 +1331,7 @@ PTR_SECOND_SEP: DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S34,S35
 PTR_CSM:     DC.L C1,C2,C3,C4,C5
 PTR_CSM_FLY: DC.L C1,C2,C3,C4,C5,C6
 PTR_LM_UP:   DC.L U1,U2,U3,U4,U5
-PTR_LM_LAND: DC.L L1,L2,L3,L4,L 5
+PTR_LM_LAND: DC.L L1,L2,L3,L4,L5
 
 S1:  DC.B '       |       ',0
 S2:  DC.B '       !       ',0
