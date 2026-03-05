@@ -138,11 +138,11 @@ DO_FLY:
     CLR.W   DISOBEYED
     CLR.W   COAST_CTR
     MOVE.W  #1,FLY_INIT
-    ; Draw rocket once (static - no need to redraw each frame)
+
     BSR     DRAW_STARS
     BSR     DRAW_FULL_ROCKET
     ; Show sep prompt once
-    MOVE.W  #$0022,D1
+    MOVE.W  #$0014,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     SEP_MSG,A1
@@ -177,13 +177,13 @@ SKIP_FLY_INIT:
     CMP.W   #SEP0_MIN_FUEL,D0
     BLE     FLY_S0_DO_SEP
     ; Too early - Houston warning + choice
-    MOVE.W  #$0024,D1
+    MOVE.W  #$0015,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0025,D1
+    MOVE.W  #$0016,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_OPT,A1
@@ -206,13 +206,13 @@ FLY_S0_DISOBEY:
     BRA     FLY_S0_DO_SEP
 FLY_S0_HBACK:
     ; Clear warning rows and resume
-    MOVE.W  #$0024,D1
+    MOVE.W  #$0015,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0025,D1
+    MOVE.W  #$0016,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -223,19 +223,19 @@ FLY_S0_HBACK:
 FLY_S0_DO_SEP:
     BSR     ERASE_ROCKET
     ; Clear prompt/warning rows
-    MOVE.W  #$0022,D1
+    MOVE.W  #$0014,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0024,D1
+    MOVE.W  #$0015,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0025,D1
+    MOVE.W  #$0016,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -247,7 +247,7 @@ FLY_S0_DO_SEP:
     BSR     DRAW_STARS
     BSR     DRAW_FIRST_SEP
     ; Show sep2 prompt once
-    MOVE.W  #$0022,D1
+    MOVE.W  #$0014,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     SEP2_MSG,A1
@@ -282,13 +282,13 @@ FLY_STAGE1:
     CMP.W   #SEP1_MIN_FUEL,D0
     BLE     FLY_S1_DO_SEP
     ; Too early - Houston warning + choice
-    MOVE.W  #$0024,D1
+    MOVE.W  #$0015,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_MSG,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0025,D1
+    MOVE.W  #$0016,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     HOUSTON_OPT,A1
@@ -311,13 +311,13 @@ FLY_S1_DISOBEY:
     BRA     FLY_S1_DO_SEP
 FLY_S1_HBACK:
     ; Clear warning rows and resume
-    MOVE.W  #$0024,D1
+    MOVE.W  #$0015,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0025,D1
+    MOVE.W  #$0016,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -328,19 +328,19 @@ FLY_S1_HBACK:
 FLY_S1_DO_SEP:
     BSR     ERASE_FIRST_SEP
     ; Clear prompt/warning rows
-    MOVE.W  #$0022,D1
+    MOVE.W  #$0014,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0024,D1
+    MOVE.W  #$0015,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
     MOVE.B  #14,D0
     TRAP    #15
-    MOVE.W  #$0025,D1
+    MOVE.W  #$0016,D1
     MOVE.B  #11,D0
     TRAP    #15
     LEA     BLANKLINE_WIDE,A1
@@ -383,6 +383,7 @@ FLY_S2_OK:
     BRA     DO_FLY
 
 FLY_GO_DOCK:
+    BSR     ERASE_SECOND_SEP
     BSR     CLEAR_SCREEN
     CLR.W   FLY_INIT
     CLR.W   STAGE_SEP
@@ -504,14 +505,14 @@ DOCK_MOVED:
     ; --- Collision check: CSM vs LM bounding boxes ---
     ; LM: cols LM_X..LM_X+7, rows LM_ROW..LM_ROW+4
     ; CSM: cols CSM_X..CSM_X+7, rows CSM_Y..CSM_Y+4
-    ; Horizontal: CSM_X+8 <= LM_X  -> no overlap
+    ; Horizontal: CSM_X+7 <= LM_X  -> no overlap
     MOVE.W  CSM_X,D0
-    ADD.W   #8,D0
+    ADD.W   #7,D0
     CMP.W   LM_X,D0
     BLE     DOCK_NO_COLL
-    ; Horizontal: LM_X+8 <= CSM_X  -> no overlap
+    ; Horizontal: LM_X+7 <= CSM_X  -> no overlap
     MOVE.W  LM_X,D0
-    ADD.W   #8,D0
+    ADD.W   #7,D0
     CMP.W   CSM_X,D0
     BLE     DOCK_NO_COLL
     ; Vertical: CSM_Y+5 <= LM_ROW  -> no overlap
@@ -529,16 +530,16 @@ DOCK_MOVED:
 DOCK_NO_COLL:
     ; Erase old CSM
     BSR     ERASE_CSM
-    ; Draw CSM at new position
-    MOVE.W  CSM_X,D4
-    MOVE.W  CSM_Y,D3
-    LEA     PTR_CSM,A0
-    MOVE.W  #SPRITE_H,D2
-    BSR     DRAW_SPRITE
-    ; Redraw LM in case CSM erased part of it
+    ; Redraw LM first (in case CSM erased part of it)
     MOVE.W  LM_X,D4
     MOVE.W  #LM_ROW,D3
     LEA     PTR_LM_UP,A0
+    MOVE.W  #SPRITE_H,D2
+    BSR     DRAW_SPRITE
+    ; Draw CSM on top (CSM overdraws LM)
+    MOVE.W  CSM_X,D4
+    MOVE.W  CSM_Y,D3
+    LEA     PTR_CSM,A0
     MOVE.W  #SPRITE_H,D2
     BSR     DRAW_SPRITE
     BRA     DOCK_NO_KEY
@@ -1329,7 +1330,7 @@ PTR_SECOND_SEP: DC.L S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S34,S35
 PTR_CSM:     DC.L C1,C2,C3,C4,C5
 PTR_CSM_FLY: DC.L C1,C2,C3,C4,C5,C6
 PTR_LM_UP:   DC.L U1,U2,U3,U4,U5
-PTR_LM_LAND: DC.L L1,L2,L3,L4,L5
+PTR_LM_LAND: DC.L L1,L2,L3,L4,L 5
 
 S1:  DC.B '       |       ',0
 S2:  DC.B '       !       ',0
@@ -1387,11 +1388,6 @@ L4: DC.B '  |__|  ',0
 L5: DC.B ' / vv \ ',0
 
     END START
-
-*~Font name~Courier New~
-*~Font size~10~
-*~Tab type~1~
-*~Tab size~4~
 
 *~Font name~Courier New~
 *~Font size~10~
