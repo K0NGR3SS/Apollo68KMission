@@ -23,7 +23,7 @@ SPRITE_H        EQU 5
 LMU_START_X     EQU 70              ; Spawn in right corner of screen
 LMU_START_Y     EQU 2               ; Start near top
 GRAVITY         EQU 1               ; Gravity pull per frame
-SURFACE_Y       EQU 28              ; Row where moon surface is
+SURFACE_Y       EQU 29              ; Row where moon surface is
 LANDING_ZONE_X1 EQU 9               ; Left edge of safe landing zone
 LANDING_ZONE_X2 EQU 49              ; Right edge of safe landing zone
 FRAME_DELAY     EQU 80
@@ -35,7 +35,7 @@ STAGE1_FUEL     EQU 80              ; Fuel for stage 1 (upper stage)
 STAGE2_FUEL     EQU 50              ; Fuel for stage 2 (coast to orbit)
 SEP0_MIN_FUEL   EQU 10              ; Must have burned to at least this much remaining
 SEP1_MIN_FUEL   EQU 10              ; Must have burned to at least this much remaining
-LAND_FUEL_MAX   EQU 38              ; Landing fuel units
+LAND_FUEL_MAX   EQU 15              ; Landing fuel units
 
 *-------------------------------------------------------
 * VARIABLES
@@ -470,15 +470,15 @@ DOCK_LOOP:
     MOVE.W  CSM_X,OLD_CSM_X
     MOVE.W  CSM_Y,OLD_CSM_Y
 
-    CMP.B   #'1',D1
+    CMP.B   #'w',D1
     BEQ     M_U
-    CMP.B   #'2',D1
+    CMP.B   #'s',D1
     BEQ     M_S
-    CMP.B   #'3',D1
+    CMP.B   #'a',D1
     BEQ     M_L
-    CMP.B   #'4',D1
+    CMP.B   #'d',D1
     BEQ     M_R
-    CMP.B   #'5',D1
+    CMP.B   #'e',D1
     BEQ     M_D
 
 DOCK_NO_KEY:
@@ -503,26 +503,23 @@ M_S:
 
 DOCK_MOVED:
     ; --- Collision check: CSM vs LM bounding boxes ---
-    ; LM: cols LM_X..LM_X+7, rows LM_ROW..LM_ROW+4
-    ; CSM: cols CSM_X..CSM_X+7, rows CSM_Y..CSM_Y+4
-    ; Horizontal: CSM_X+6 <= LM_X  -> no overlap
     MOVE.W  CSM_X,D0
-    ADD.W   #6,D0
+    ADD.W   #5,D0
     CMP.W   LM_X,D0
     BLE     DOCK_NO_COLL
-    ; Horizontal: LM_X+6 <= CSM_X  -> no overlap
+    ; Horizontal: LM_X+5 <= CSM_X  -> no overlap
     MOVE.W  LM_X,D0
-    ADD.W   #6,D0
+    ADD.W   #4,D0
     CMP.W   CSM_X,D0
     BLE     DOCK_NO_COLL
     ; Vertical: CSM_Y+5 <= LM_ROW  -> no overlap
     MOVE.W  CSM_Y,D0
-    ADD.W   #SPRITE_H,D0
+    ADD.W   #SPRITE_H-1,D0
     CMP.W   #LM_ROW,D0
     BLE     DOCK_NO_COLL
-    ; Vertical: LM_ROW+5 <= CSM_Y  -> no overlap (CSM below LM = valid approach)
+    ; Vertical: LM_ROW+5 <= CSM_Y  -> no overlap
     MOVE.W  #LM_ROW,D0
-    ADD.W   #SPRITE_H,D0
+    ADD.W   #SPRITE_H-1,D0
     CMP.W   CSM_Y,D0
     BLE     DOCK_NO_COLL
     ; COLLISION - Houston we have a problem!
@@ -548,21 +545,46 @@ M_D:
     MOVE.W  CSM_X,D0
     SUB.W   LM_X,D0
     BSR     ABS
-    CMP.W   #3,D0
+    CMP.W   #4,D0
     BGT     DOCK_LOOP
     ; Check Y alignment
     MOVE.W  CSM_Y,D0
     SUB.W   #LM_ROW+5,D0
     BSR     ABS
-    CMP.W   #1,D0
+    CMP.W   #2,D0
     BGT     DOCK_LOOP
 D_OK:
+    ;erase docking stage csm at its current position
+    MOVE.W  CSM_X,OLD_CSM_X
+    MOVE.W  CSM_Y,OLD_CSM_Y
+    BSR     ERASE_CSM
+    
+    ;erase docking stage lmu at its static position
+    MOVEM.L D0-D5/A0-A1,-(A7)
+    MOVE.W  LM_X,D4
+    MOVE.W  #LM_ROW,D3
+    MOVE.W  #SPRITE_H,D2
+    
+ERASE_LM_DOCK
+    MOVE.W  D4,D1
+    LSL.W   #8,D1
+    OR.B    D3,D1
+    MOVE.B  #11,D0
+    TRAP    #15
+    LEA     BLANK_SMALL,A1
+    MOVE.B  #14,D0
+    TRAP    #15
+    ADDQ.W  #1,D3
+    SUBQ.W  #1,D2
+    BNE     ERASE_LM_DOCK
+    MOVEM.L (A7)+,D0-D5/A0-A1
+    
     BSR     CLEAR_SCREEN
     CLR.W   DOCKED_ALT
     MOVE.B  #FLY_DOCKED,STATE
     BRA     MAIN_LOOP
 
-DOCK_CRASH:
+DOCK_CRASH:    
     BSR     CLEAR_SCREEN
     MOVE.W  #$050A,D1
     MOVE.B  #11,D0
@@ -628,8 +650,8 @@ DRAW_JOINT:
 ERASE_JOINT:
     MOVEM.L D0-D5/A0-A1,-(A7)
     MOVE.W  #30,D4
-    MOVE.W  #4,D3
-    MOVE.W  #12,D2
+    MOVE.W  #5,D3
+    MOVE.W  #10,D2
 EJ_L:
     MOVE.W  D4,D1
     LSL.W   #8,D1
@@ -708,14 +730,14 @@ LAND_THRUST:
     BRA     LAND_DONE
 
 LAND_LEFT:
-    SUB.W   #1,LMU_VX        ; apply leftward velocity impulse
+    SUB.W   #2,LMU_VX        ; apply leftward velocity impulse
     CMP.W   #-4,LMU_VX
     BGE     LAND_DONE
     MOVE.W  #-4,LMU_VX       ; clamp
     BRA     LAND_DONE
 
 LAND_RIGHT:
-    ADD.W   #1,LMU_VX        ; apply rightward velocity impulse
+    ADD.W   #2,LMU_VX        ; apply rightward velocity impulse
     CMP.W   #4,LMU_VX
     BLE     LAND_DONE
     MOVE.W  #4,LMU_VX        ; clamp
@@ -774,10 +796,10 @@ UL_HORIZ:
     TST.W   LMU_VX
     BEQ     UL_DONE
     BPL     UL_VX_POS
-    ADDQ.W  #1,LMU_VX       ; negative VX: nudge toward 0
+    ADDQ.W  #2,LMU_VX       ; negative VX: nudge toward 0
     BRA     UL_DONE
 UL_VX_POS:
-    SUBQ.W  #1,LMU_VX       ; positive VX: nudge toward 0
+    SUBQ.W  #2,LMU_VX       ; positive VX: nudge toward 0
 
 UL_DONE:
     MOVEM.L (A7)+,D0
@@ -1297,7 +1319,7 @@ END_GAME:
 STAR:           DC.B    '*',0
 ALT_MSG:        DC.B    'ALTITUDE: ',0
 PROMPT_LAUNCH:  DC.B    '1 to Lift Off!',0
-DOCK_MSG:       DC.B    'Move: 1=Up 2=Dw 3=Lt 4=Rt 5=Dock',0
+DOCK_MSG:       DC.B    'Move: WASD Controls e=Dock',0
 BLANKLINE_WIDE: DC.B    '                                                                          ',0
 VY_MSG:         DC.B    'VY:',0
 X_MSG:          DC.B    '  X:',0
@@ -1390,6 +1412,10 @@ L5: DC.B ' / vv \ ',0
 
     END START
 
+*~Font name~Courier New~
+*~Font size~10~
+*~Tab type~1~
+*~Tab size~4~
 *~Font name~Courier New~
 *~Font size~10~
 *~Tab type~1~
