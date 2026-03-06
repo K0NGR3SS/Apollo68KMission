@@ -4,6 +4,9 @@ An Apollo 11 moon landing game built in Motorola 68000 assembly for the Easy68K 
 
 Fly the Saturn V through orbital ascent, dock the CSM with the Lunar Module, cruise to the Moon, and land safely on the surface — all in retro ASCII-art style.
 
+Flowchart:
+![Flowchart](flowchart.png)
+
 ## Before You Play
 
 Watch the trailer video: https://youtu.be/eCJLcT0Xu-k?is=AcnC1Y1tVFiOwsJs
