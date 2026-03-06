@@ -6,6 +6,8 @@ Fly the Saturn V through orbital ascent, dock the CSM with the Lunar Module, cru
 
 ## Before You Play
 
+Watch the trailer video: https://youtu.be/eCJLcT0Xu-k?is=AcnC1Y1tVFiOwsJs
+
 Let all the audio clips play through before pressing any keys — the sound effects and music make the experience way cooler.
 
 ## How to Run
