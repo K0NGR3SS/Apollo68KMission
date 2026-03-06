@@ -1464,6 +1464,7 @@ CL_DONE:
 
 ; After successful landing, end the game
 CL_END_GAME:
+    BRA     END_GAME
 *===========================================================
 * RENDERING SUBROUTINES
 * These routines draw and erase sprites on the text screen.
